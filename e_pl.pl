@@ -303,8 +303,11 @@ GOTCHILD: ;
 			$popGeometry = $xpopup2->geometry();
 			$popGeometry =~ s/[+-].+$//o  if ($ENV{DESKTOP_SESSION} =~ /AfterStep/io);  #AFTERSTEP BUG - WANTS TO FORCE TO UPPER-LEFT PART OF DESKTOP?!
 #print STDERR "-geometry now=$popGeometry=\n";
+$MainWin->focus();   #SEEMS TO BE NEEDED BY OUR W/M TO PROPERLY RESTORE FOCUS?!
+$textScrolled[$activeWindow]->Subwidget($textsubwidget)->focus;
 			$xpopup2->destroy;
 			$MainWin->Unbusy;
+$MainWin->raise();
 		});
 	$okButton->pack(-side=>'left', -expand => 1, -padx=>'2m', -pady=>'1m');
 	$abortButton = $xpopup2btnFrame->Button(

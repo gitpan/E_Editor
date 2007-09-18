@@ -200,3 +200,7 @@ Changes:
 		  when palette theme changed from a dark to a light color.
 		- Switched from CodeText to TextHighlight as the highlighting 
 		  text widget of choice.
+4.42 Mon Sep 17 2007
+		- Minor fixes to make the AfterStep window-manager raise and give 
+		  focus to the proper window whenever a popup window is closed. 
+		  This only affects AfterStep when used in "ClickToFocus" mode.
