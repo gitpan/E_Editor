@@ -23,7 +23,7 @@ eval {$textScrolled[$activeWindow]->index('sel.first')};
 
 $thismenu = $perlMenubtn;
 
-foreach $i (qw(A B BR BODY CHECKBOX CENTER FONT FORM H1 H2 H3 H4 HEAD HR HTML I IEXCL LI MU NBSP OPTION P QUOTE RADIO SELECT TABLE TD TH TR TEXTAREA UL !EVAL !IF !INCLUDE !LOOP !PERL !SELECTLIST))
+foreach $i (qw(A B BR BODY CHECKBOX CENTER CODE DIV FONT FORM H1 H2 H3 H4 HEAD HR HTML I IEXCL LI MU NBSP OPTION P QUOTE RADIO SELECT SPAN STYLE TABLE TD TH TR TEXTAREA U UL !EVAL !IF !INCLUDE !LOOP !PERL !SELECTLIST))
 {
 	if ($i eq 'TABLE')
 	{
@@ -68,8 +68,22 @@ sub perlFn
 				$browser = <T>;
 				chomp ($browser);
 			}
-			$browser ||= $bummer ? 'start' : 'netscape';
-			system "$browser $hometmp/e.src.htm &";
+			$_ = "$hometmp/e.src.htm";
+			if ($bummer)
+			{
+				$browser ||= start;
+				s/ /\%20/gso;
+				s#\/#\\#gso;
+				$_ = $browser . ' file:///' . $_;
+			}
+			else
+			{
+				$browser ||= $ENV{BROWSER} || 'firefox';
+				$_ = $browser . ' ' . $_ . ' &';
+			}
+#print "-???- will run cmd=$_=";
+			system $_;
+#print "-???- DONE VIEWING!\n";
 		}
 		return;
 	}
@@ -78,7 +92,7 @@ sub perlFn
 		#######&doCopy();
 		eval {$textScrolled[$activeWindow]->index('sel.first')};
 		$intext = '';
-		if ($mytag =~ '(A|BODY|CHECKBOX|FONT|FORM|HR|OPTION|RADIO|SELECT|TABLE|TD|TH|TR|TEXTAREA|\!EVAL|\!IF|\!INCLUDE|\!LOOP|\!SELECTLIST)')
+		if ($mytag =~ '(A|BODY|CHECKBOX|DIV|FONT|FORM|HR|OPTION|RADIO|SELECT|SPAN|TABLE|TD|TH|TEXTAREA|\!EVAL|\!IF|\!INCLUDE|\!LOOP|\!SELECTLIST)')
 		{
 			&gettext("$mytag Tag Info:",40,'t',0,1);
 			return  if ($intext eq '*cancel*');
@@ -88,7 +102,7 @@ sub perlFn
 		eval {$pos = $textScrolled[$activeWindow]->index('sel.first');};
 		my ($highlighted) = 0;
 		$highlighted = 1  unless ($@);
-		$pos =~ s/.*\.//;
+		$pos =~ s/.*\.//o;
 		#eval {$textScrolled[$activeWindow]->insert('sel.first',"<$mytag$intext>");};
 		if ($mytag eq 'NBSP')
 		{
@@ -114,9 +128,10 @@ sub perlFn
 			}
 			$textScrolled[$activeWindow]->insert('insert',"<$mytag$intext>");
 			$textScrolled[$activeWindow]->markSet('mymark','insert - 1 char');
-			if ($mytag =~ '(A|BODY|FONT|FORM|SELECT|TABLE|TD|TH|TR|TEXTAREA|\!EVAL|\!IF|\!LOOP|\!SELECTLIST)')
+			&beginUndoHTMLBlock($textScrolled[$activeWindow]);
+			if ($mytag =~ '(A|BODY|DIV|FONT|FORM|SELECT|SPAN|STYLE|TABLE|TD|TH|TR|TEXTAREA|\!EVAL|\!IF|\!LOOP)')
 			{
-				if ($mytag =~ /^!/)
+				if ($mytag =~ /^!/o)
 				{
 					$textScrolled[$activeWindow]->insert('insert', 
 						('<!/'.substr($mytag,1).'>'));
@@ -126,25 +141,36 @@ sub perlFn
 					$textScrolled[$activeWindow]->insert('insert',"</$mytag>");
 				}
 			}
+			&endUndoHTMLBlock($textScrolled[$activeWindow]);
 			$textScrolled[$activeWindow]->markSet('insert','mymark + 1 char');
 		}
 		else
 		{
+			&beginUndoHTMLBlock($textScrolled[$activeWindow]);
+print STDERR "-!!!- BEGIN UNDOBLOCK!\n"  if ($debug);
 			my ($startpos) = $textScrolled[$activeWindow]->index('sel.first');
 			my ($endpos) = $textScrolled[$activeWindow]->index('sel.last');
+print STDERR "-???- st=$startpos= en=$endpos= ls=".$textScrolled[$activeWindow]->index('sel.first linestart')."= le=".$textScrolled[$activeWindow]->index('sel.last lineend')."=\n"
+if ($debug);
 			my ($startline) = $startpos;
-			$startline =~ s/\..*//;
+			$startline =~ s/\..*//o;
 			my ($endline) = $endpos;
-			$endline =~ s/\..*//;
+			$endline =~ s/\..*//o;
+	my $spacesperTab = $tabspacing || 3;
+	my $tspaces = ' ' x $spacesperTab;
+	my $indentStr = $notabs ? $tspaces : "\t";
 			my ($x) = '';
 			my ($x2) = '';
-			if (($endline > $startline) && ($startpos =~ /\.0$/) && ($endpos =~ /\.0$/))
+			if (($endline > $startline) && ($startpos =~ /\.0$/o) && ($endpos =~ /\.0$/o))
 			{
 				my ($lastline) = $textScrolled[$activeWindow]->get('sel.first','sel.first lineend');
-				$x = $1  if ($lastline =~ /^(\s+)/);
-				$x =~ s/\t/   /g;
-				$x =~ s/   /\t/g;
+				$x = $1  if ($lastline =~ /^(\s+)/o);
+#				$x =~ s/\t/   /g;
+#				$x =~ s/   /\t/g;
+				$x =~ s/\t/$tspaces/g;
+				$x =~ s/$tspaces/\t/g  unless ($notabs);
 				my ($tabcnt) = length($x);
+				$tabcnt /= $spacesperTab  if ($notabs);
 				if ($mytag eq 'QUOTE')
 				{
 					eval {$textScrolled[$activeWindow]->insert('sel.first',"$x&quot;\n");};
@@ -153,15 +179,15 @@ sub perlFn
 				{
 					eval {$textScrolled[$activeWindow]->insert('sel.first',"$x<$mytag$intext>\n");};
 				}
-				eval {&doIndent(1);};
-				if ($SuperText)
+				eval {&doIndent(1,0);};
+#1				if ($SuperText)
 				{
 					$x2 = "\n";
 				}
-				else
-				{
-					$x = "\n" . $x;
-				}
+#1				else
+#1				{
+#1					$x = "\n" . $x;
+#1				}
 			}
 			else
 			{
@@ -198,6 +224,9 @@ sub perlFn
 			{
 				$textScrolled[$activeWindow]->insert('sel.last',"$x</$mytag>$x2");
 			}
+#####			$textScrolled[$activeWindow]->markSet('sel.last', 'sel.last + 1 char');
+			&endUndoHTMLBlock($textScrolled[$activeWindow]);
+print STDERR "-!!!- END UNDOBLOCK!\n"  if ($debug);
 		}
 		return;
 	}
@@ -241,7 +270,11 @@ sub perlFn
 	my $fileMenubtn = $w_menu->Menubutton(-text => 'File', -underline => 0);
 	$fileMenubtn->command(-label => 'Save',    -underline =>0, -command => [\&doSave]);
 	$fileMenubtn->separator;
-	$fileMenubtn->command(-label => 'Close',   -underline =>0, -command => [$xpopup2 => 'destroy']);
+	$fileMenubtn->command(-label => 'Close',   -underline =>0, -command => sub {
+		$textScrolled[$activeWindow]->Subwidget($textsubwidget)->focus;
+		$xpopup2 => 'destroy';
+		$MainWin->raise();
+	});
 	my $editMenubtn = $w_menu->Menubutton(-text => 'Edit', -underline => 0);
 	$editMenubtn->command(
 		-label => 'Copy',
@@ -273,7 +306,11 @@ sub perlFn
 		-padx => 11,
 		-underline => 0,
 		-text => 'Ok',
-		-command => sub {$xpopup2->destroy;});
+		-command => sub {
+		$textScrolled[$activeWindow]->Subwidget($textsubwidget)->focus;
+		$xpopup2 => 'destroy';
+		$MainWin->raise();
+	});
 	$okButton->pack(-side=>'left', -expand => 1, -padx=>'2m', -pady=>'1m');
 	$bottomFrame->pack(
 		-side => 'bottom',
@@ -316,7 +353,7 @@ sub perlFn2
 	my ($startpos) = $textScrolled[$activeWindow]->index('insert');
 #print "<BR>startpos was =$startpos=\n";
 	my ($linesback) = 0;
-	$linesback = 1  if ($actualcurpos =~ /\.0$/);
+	$linesback = 1  if ($actualcurpos =~ /\.0$/o);
 	$startpos = $curpos;
 #print "<BR>startpos  is =$startpos= lb=$linesback=\n";
 	my ($highlighted) = undef;
@@ -393,7 +430,7 @@ sub reallign
 		$selstart = '0.0';
 		$selend = $textScrolled[$activeWindow]->index('end');
 	}
-	my (@lines) = split(/\n/, $wholething);
+	my (@lines) = split(/\n/o, $wholething);
 
 	if (open (TEMPFID,">$hometmp/e.reformat.tmp"))
 	{
@@ -410,36 +447,37 @@ sub reallign
 	my $hereend;
 	
 	$current_indent = $intext;
+	&beginUndoHTMLBlock($textScrolled[$activeWindow]);
 	for (my $i=0;$i<=$#lines;$i++)
 	{
 #print "---next line($i)=$lines[$i]=\n";
-		next  if ($lines[$i] =~ /^\#\#*(print|for)/);  #LEAVE OUR DEBUG STUFF ALONE!
-		next  if ($lines[$i] =~ /^\#*print/);  #LEAVE OUR DEBUG STUFF ALONE!
-		next  if ($lines[$i] =~ /^\s*\#/);     #ADDED 20010514 - LEAVE COMMENTED LINES ALONE!
-		next  if ($lines[$i] =~ /^\=\w/);      #ADDED 20010514 - LEAVE POD COMMANDS ALONE!
+		next  if ($lines[$i] =~ /^\#\#*(print|for)/o);  #LEAVE OUR DEBUG STUFF ALONE!
+		next  if ($lines[$i] =~ /^\#*print/o);  #LEAVE OUR DEBUG STUFF ALONE!
+		next  if ($lines[$i] =~ /^\s*\#/o);     #ADDED 20010514 - LEAVE COMMENTED LINES ALONE!
+		next  if ($lines[$i] =~ /^\=\w/o);      #ADDED 20010514 - LEAVE POD COMMANDS ALONE!
 		if ($hereend)  #LEAVE HERE-STRINGS ALONE!
 		{
 			$hereend = ''  if ($lines[$i] =~ /^$hereend/);  #LEAVE HERE-STRING ENDTAGS ALONE!
 			next;
 		}
-		$lines[$i] =~ s/^\s+//;
+		$lines[$i] =~ s/^\s+//o;
 		$lines[$i] =~ s/([\'\"])([^\1]*)?\1/my ($one,$two) = ($1,$2); 
 				$two =~ s!\#!\x02!; "$one$two$one"/eg;
 		$comment = '';
-		$comment = $1  if ($lines[$i] =~ s/^(\#.*)$//);
+		$comment = $1  if ($lines[$i] =~ s/^(\#.*)$//o);
 		$comment = $2  if (!$comment && $lines[$i] =~ s/([^\$])(\#.*)$/$1/);
 
 		$_ = $lines[$i];
 		s/\{.*?\}//g;
-		$current_indent--  if ($current_indent && /\}\s*$/);
+		$current_indent--  if ($current_indent && /\}\s*$/o);
 #print "\n-???- ci=$current_indent= lines($i)=$lines[$i]=\n";
 		$lines[$i] = ("\t" x $current_indent) . $lines[$i] 
 				unless ($lines[$i] =~ s/^\s*(\w+\:)\s*(.*)$/$1.("\t" x $current_indent).$2/e);
-		$cont = 0  if ($lines[$i] =~ /^\s*\-/);
-		$cont = 0  if ($lines[$i] =~ /^\s*\{/);   #ADDED 20010514
+		$cont = 0  if ($lines[$i] =~ /^\s*\-/o);
+		$cont = 0  if ($lines[$i] =~ /^\s*\{/o);   #ADDED 20010514
 		$lines[$i] = "\t\t" . $lines[$i]  if ($cont);
-		$hereend = $1  if ($lines[$i] =~ /\<\<[\'\"]?(\w+)/);  #CHECK `HERE-STRINGS.
-		if ($lines[$i] =~ /\}\s*(else.*|elsif.*){\s*$/)   #HANDLE STUFF LIKE "} else {".
+		$hereend = $1  if ($lines[$i] =~ /\<\<[\'\"]?(\w+)/o);  #CHECK `HERE-STRINGS.
+		if ($lines[$i] =~ /\}\s*(else.*|elsif.*){\s*$/o)   #HANDLE STUFF LIKE "} else {".
 		{
 #print "($i) case 1\n";
 			$current_indent--  if ($current_indent);
@@ -449,49 +487,78 @@ sub reallign
 		}
 		#if ($lines[$i] =~ /\S\s*\{[^\}]*$/)  #FIX K & R-STYLE BRACES.
 #print "---THIS line($i)=$lines[$i]=\n";
-		if ($lines[$i] =~ /\S\s*\{\s*$/)  #FIX K & R-STYLE BRACES.
+		if ($lines[$i] =~ /\S\s*\{\s*$/o)  #FIX K & R-STYLE BRACES.
 		{
 #print "($i) case 2\n";
-			$lines[$i] =~ s/\s*\{\s*$//;
+			$lines[$i] =~ s/\s*\{\s*$//o;
 			$lines[$i] .= "\n" . ("\t" x $current_indent) . "{";
 		}
-		if ($lines[$i] =~ /^[^\{\s]+\s*\}/)
+		if ($lines[$i] =~ /^[^\{\s]+\s*\}/o)
 		{
 #print "($i) case 3\n";
-			$lines[$i] =~ s/^[^\{]*\s*\}\s*(.*)$//;
+			$lines[$i] =~ s/^[^\{]*\s*\}\s*(.*)$//o;
 			$current_indent--  if ($current_indent);
 			$lines[$i] = ("\t" x $current_indent) . "}\n" 
 					. ("\t" x $current_indent) . $1;
 		}
-		if ($lines[$i] =~ /^[^\{]*\}\s*(\S.*)$/)
+		if ($lines[$i] =~ /^[^\{]*\}\s*(\S.*)$/o)
 		{
 #print "($i) case 4\n";
 			$current_indent--  if ($current_indent);
 			$lines[$i] = ("\t" x $current_indent) . "}\n" 
 					. ("\t" x $current_indent) . $1;
 		}
-		if ($lines[$i] =~ /\{\s*$/ || $lines[$i] =~ /^\s*\{/)
+		if ($lines[$i] =~ /\{\s*$/o || $lines[$i] =~ /^\s*\{/o)
 		{
 			$current_indent++;
 		}
 		$cont = 0;
 		#$cont = 1  if ($lines[$i] =~ /[\,\'\+\-\=\*\/\"\.\&\|]\s*$/);
 		#CHGD TO NEXT LINE 20010514.
-		$cont = 1  if ($lines[$i] =~ /[\,\'\+\-\=\*\/\"\.\&\|\(\)]\s*$/);
+		$cont = 1  if ($lines[$i] =~ /[\,\'\+\-\=\*\/\"\.\&\|\(\)]\s*$/o);
 		$cont = 0  if ($lines[$i] =~ /^\s*\-/);
-		$lines[$i] = "\t\t".$lines[$i]  if ($lines[$i] =~ /^\s*\-\S/);
+		$lines[$i] = "\t\t".$lines[$i]  if ($lines[$i] =~ /^\s*\-\S/o);
 		$lines[$i] .= $comment;
-		$lines[$i] =~ s/\x02/\#/g;
-		$lines[$i] =~ s/^\s+$//g;   #ADDED 20010514 - COMPLETELY BLANK EMPTY LINES.
+		$lines[$i] =~ s/\x02/\#/go;
+		$lines[$i] =~ s/^\s+$//go;   #ADDED 20010514 - COMPLETELY BLANK EMPTY LINES.
 		#$lines[$i] = ("\t" x $current_indent) . $lines[$i];
 #print "- ci=$current_indent= cont=$cont= lines($i)=$lines[$i]=\n";
 	}
+	&endUndoHTMLBlock($textScrolled[$activeWindow]);
 	$textScrolled[$activeWindow]->markSet('insert',$selstart);
 	$textScrolled[$activeWindow]->delete($selstart, $selend);
 	$wholething = join("\n",@lines) . "\n";
 	$textScrolled[$activeWindow]->insert('insert',$wholething);
 	$textScrolled[$activeWindow]->markSet('insert',$curposn);
 	$statusLabel->configure(-text=>"..Realligned.");
+}
+
+sub beginUndoHTMLBlock
+{
+	my $whichTextWidget = shift;
+
+	if ($textsubwidget =~ /supertext/io)   #ADDED 20080411 TO BLOCK CHANGES FOR UNDO.
+	{
+		eval { $whichTextWidget->_beginUndoBlock };
+	}
+	else
+	{
+		eval { $whichTextWidget->addGlobStart };
+	}
+}
+
+sub endUndoHTMLBlock
+{
+	my $whichTextWidget = shift;
+
+	if ($textsubwidget =~ /supertext/io)   #ADDED 20080411 TO BLOCK CHANGES FOR UNDO.
+	{
+		eval { $whichTextWidget->_endUndoBlock };
+	}
+	else
+	{
+		eval { $whichTextWidget->addGlobEnd };
+	}
 }
 
 1

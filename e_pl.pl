@@ -19,9 +19,13 @@ $perlMenubtn->command(
 	-underline =>0,
 	-command => [\&perlFn2,1]);
 $perlMenubtn->command(
-	-label => 'Comment',
-	-underline =>0,
-	-command => [\&commentFn]);
+	-label => 'Comment (#)',
+	-underline =>1,
+	-command => [\&commentFn,0]);
+$perlMenubtn->command(
+	-label => 'Comment (Pod)',
+	-underline =>9,
+	-command => [\&commentFn,1]);
 $perlMenubtn->command(
 	-label => 'If-Then',
 	-underline =>3,
@@ -55,7 +59,7 @@ $perlMenubtn->command(
 	-underline =>0,
 	-command => [\&perlFn2,8]);
 $perlMenubtn->command(
-	-label => 'Tabs_'.($tabspacing||3),
+	-label => 'Tabs_'.($tabspacing||3).'_2spc',
 	#-underline =>0,
 	-command => [\&perlFn2,10]);
 $perlMenubtn->command(
@@ -128,7 +132,7 @@ sub perlFn
 			if ($bummer)
 			{
 				#$_ = "perl c:\\tmp\\e.src.tmp $intext >c:\\tmp\\e.out.tmp";
-				$_ = "\\perl\\bin\\perl $hometmp\\e.src.tmp $intext >$hometmp\\e.out.tmp";
+				$_ = "\\perl\\bin\\perl \"$hometmp\\e.src.tmp\" $intext >\"$hometmp\\e.out.tmp\"";
 #print "-RUNNING CMD=$_=\n";
 				system $_;
 #print "-DID CMD!\n";
@@ -176,10 +180,10 @@ GOTCHILD: ;
 			if ($bummer)
 			{
 				#$_ = "perl -c c:\\tmp\\e.src.tmp 2>c:\\tmp\\e.out.tmp";
-				$_ = "\\perl\\bin\\perl -c $hometmp\\e.src.tmp 2>$hometmp\\e.out.tmp";
+				$_ = "\\perl\\bin\\perl -c \"$hometmp\\e.src.tmp\" 2>\"$hometmp\\e.out.tmp\"";
 				if (`TYPE c:\\tmp\\e.out.tmp` =~ /\"\-T\" is on the \#\! line/o)
 				{
-					$_ = "\\perl\\bin\\perl -T -c $hometmp\\e.src.tmp 2>$hometmp\\e.out.tmp";
+					$_ = "\\perl\\bin\\perl -T -c \"$hometmp\\e.src.tmp\" 2>\"$hometmp\\e.out.tmp\"";
 				}
 			}
 			else
@@ -240,7 +244,11 @@ GOTCHILD: ;
 	my $fileMenubtn = $w_menu->Menubutton(-text => 'File', -underline => 0);
 	$fileMenubtn->command(-label => 'Save',    -underline =>0, -command => [\&doSave]);
 	$fileMenubtn->separator;
-	$fileMenubtn->command(-label => 'Close',   -underline =>0, -command => [$xpopup2 => 'destroy']);
+	$fileMenubtn->command(-label => 'Close',   -underline =>0, -command => sub {
+		$textScrolled[$activeWindow]->Subwidget($textsubwidget)->focus;
+		$xpopup2 => 'destroy';
+		$MainWin->raise();
+	});
 	my $editMenubtn = $w_menu->Menubutton(-text => 'Edit', -underline => 0);
 	$editMenubtn->command(
 		-label => 'Copy',
@@ -524,15 +532,15 @@ sub perlFn2
 		{
 			$textScrolled[$activeWindow]->markSet('insert',"$curpos + 1 line");
 		}
-		eval {&doIndent(1);};
-		if ($SuperText)
+		eval {&doIndent(1,0);};
+#1		if ($SuperText)
 		{
 			eval {$textScrolled[$activeWindow]->markSet('insert','sel.last linestart');};
 		}
-		else
-		{
-			eval {$textScrolled[$activeWindow]->markSet('insert','sel.last + 1 line linestart');};
-		}
+#1		else
+#1		{
+#1			eval {$textScrolled[$activeWindow]->markSet('insert','sel.last + 1 line linestart');};
+#1		}
 		$endpos = $textScrolled[$activeWindow]->index("insert linestart");
 		if ($sameline == 2)
 		{
@@ -563,6 +571,7 @@ sub perlFn2
 		}
 	};
 
+	&beginUndoPerlBlock($textScrolled[$activeWindow])  unless ($which == 4 || $which == 8);
 	if ($which == 1)        #BLOCK
 	{
 		$insstr = '';
@@ -680,6 +689,7 @@ sub perlFn2
 	{
 		&fixTabs(2,$tabspacing||3);
 	}
+	&endUndoPerlBlock($textScrolled[$activeWindow])  unless ($which == 4 || $which == 8);
 }
 
 sub shebang
@@ -749,6 +759,7 @@ sub reallign
 	}
 	my $hereend;
 
+	&beginUndoPerlBlock($textScrolled[$activeWindow]);
 	$current_indent = $intext;
 	for (my $i=0;$i<=$#lines;$i++)
 	{
@@ -908,7 +919,11 @@ sub reallign
 	$wholething =~ s|\x02\^3jSpR1tE\x02|\}|gso;   #UNPROTECT BRACES IN QUOTES.
 	$wholething =~ s|\x02\^4jSpR1tE\x02|\;|gso;   #UNPROTECT SEMICOLONS IN QUOTES.
 	$textScrolled[$activeWindow]->insert('insert',$wholething);
+$textScrolled[$activeWindow]->markSet('selstart',$selstart);
+$textScrolled[$activeWindow]->markSet('selend',$selend);
+eval { $textScrolled[$activeWindow]->tagAdd('sel', 'selstart', 'selend'); };
 	$textScrolled[$activeWindow]->markSet('insert',$curposn);
+	&endUndoPerlBlock($textScrolled[$activeWindow]);
 	$statusLabel->configure(-text=>"..Realligned.");
 }
 
@@ -1010,8 +1025,14 @@ sub FetchAbortedOutput
 
 sub commentFn
 {
+	my $pod = shift;
+	
 	my $clipboard;
 	my ($lastpos) = $textScrolled[$activeWindow]->index('sel.last');
+
+	&gettext(($pod ? '=head2:' : 'Addtl String?:'),6,'t');
+	return  if ($intext eq  '*cancel*');
+	return  if ($pod && length($intext) < 1);
 
 	$textScrolled[$activeWindow]->markSet('selstart','sel.first linestart - 2 char');
 	if ($lastpos =~ /\.0$/o)
@@ -1026,11 +1047,19 @@ sub commentFn
 	$textScrolled[$activeWindow]->markSet('insert','selend');
 	$clipboard = $textScrolled[$activeWindow]->get('sel.first linestart - 1 char','selend');
 		my @l = split(/\n/o, $clipboard, -1);
+	my $prefix = $pod ? '' : '#' . $intext;
 	for (my $i=1;$i<=$#l;$i++)
 	{
-		$l[$i] = '#' . $l[$i];
+		$l[$i] = $prefix . $l[$i];
 	}
 	$clipboard = join("\n", @l);
+	if ($pod)
+	{
+		$clipboard = "\n" . $clipboard  unless ($clipboard =~ /^\n/so);
+		$clipboard = "\n\n=head2 $intext\n" . $clipboard;
+		$clipboard .= "\n"  unless ($clipboard =~ /\n$/so);
+		$clipboard .= "\n=cut\n";
+	}
 	$textScrolled[$activeWindow]->delete('sel.first linestart - 1 char','selend');
 	$textScrolled[$activeWindow]->insert('insert',$clipboard);
 	$textScrolled[$activeWindow]->tagAdd('sel','selstart + 2 char','selend + 1 char');
@@ -1044,6 +1073,34 @@ sub findFns
 #print "-findFns: srch=$srchTextVar= cmdfile($activeWindow)=$cmdfile[$activeWindow]=\n";
 	$srchopts = '-regexp';
 	&GlobalSrchRep($whichTextWidget, 1);
+}
+
+sub beginUndoPerlBlock
+{
+	my $whichTextWidget = shift;
+
+	if ($textsubwidget =~ /supertext/io)   #ADDED 20080411 TO BLOCK CHANGES FOR UNDO.
+	{
+		eval { $whichTextWidget->_BeginUndoBlock };
+	}
+	else
+	{
+		eval { $whichTextWidget->addGlobStart };
+	}
+}
+
+sub endUndoPerlBlock
+{
+	my $whichTextWidget = shift;
+
+	if ($textsubwidget =~ /supertext/io)   #ADDED 20080411 TO BLOCK CHANGES FOR UNDO.
+	{
+		eval { $whichTextWidget->_EndUndoBlock };
+	}
+	else
+	{
+		eval { $whichTextWidget->addGlobEnd };
+	}
 }
 
 1

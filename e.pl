@@ -1,8 +1,8 @@
 #!/perl/bin/perl -s 
 
 #NOTE: Windows compile:  perl2exe -gui -perloptions="-p2x_xbm -s" e.pl
-#NOTE: POD compile:  pp -g -M Tk::ROText -M Tk::Text::SuperText -M Tk::TextHighlight -M Tk::TextHighlight::Perl -o ee.exe e.pl
-#NOTE: POD compile:  pp -g -M Tk::ROTextANSIColor -M Tk::Text::ROSuperText -M Tk::ROTextHighlight -M Tk::TextHighlight::Perl -M Tk::XMLViewer -o vv.exe v.pl
+#NOTE: POD compile:  pp -g -M e_static_highlightmodules -o ec.exe e.pl
+#NOTE: POD compile:  pp -g -M e_static_basemodules -o e.exe e.pl
 
 #NOTE: In Winblows, you MUST set the palette when starting up rather than 
 #relying on the Windows default IF you wish to be able to change the palette 
@@ -29,14 +29,18 @@ use lib "/perl/site/lib";
 #MACHINE FOR (POSSIBLY OLDER) INSTALLED PERL LIBS (IF HE HAS PERL INSTALLED)!
 BEGIN
 {
-	if ($0 =~ /exe$/i)
+	$v = 1  if ($0 =~ /v\w*\./io);
+	$vexe = 1  if ($0 =~ /exe$/io);
+	if ($vexe)
 	{
 		while (@INC)
 		{
 			$_ = shift(@INC);
-			push (@myNewINC, $_)  if (/(?:cache|CODE)/);
+			push (@myNewINC, $_)  if (/(?:cache|CODE)/o);
 		}
 		@INC = @myNewINC;
+		eval ($0 =~ /[ev]c\w*\./io) ? 'use e_static_highlightmodules'
+				: 'use e_static_basemodules';
 	}
 }
 ################# END PAR COMPILER SECTION ##################
@@ -50,6 +54,7 @@ use Tk::Checkbutton;
 use Tk::Radiobutton;
 use Tk::ColorEditor;  #ADDED 20010131.
 use Tk::Adjuster;
+use Tk::NoteBook;
 use Text::Tabs;
 use Cwd;
 
@@ -65,9 +70,15 @@ use Tk::JOptionmenu;
 $haveXML = 0; $haveTextHighlight = 0; $Ansicolor = 0; $SuperText = 0; $havePerlCool = 0;
 $haveHTML = 0; $haveJS = 0; $haveBash = 0;
 
-#$v = 1  if ($0 =~ /v(\.pl)?$/i);   #CHGD. TO NEXT 20040915.
-$v = 1  if ($0 =~ /v\w*\./io);
 $Steppin = ($ENV{DESKTOP_SESSION} =~ /AfterStep/io) ? 1 : 0;
+$bummer = 1  if ($^O =~ /Win/o);
+
+if ($bummer)
+{
+	$ENV{HOME} ||= $ENV{USERPROFILE}  if (defined $ENV{USERPROFILE});
+	$ENV{HOME} ||= $ENV{ALLUSERSPROFILE}  if (defined $ENV{ALLUSERSPROFILE});
+	$ENV{HOME} =~ s#\\#\/#gso;
+}
 
 #FETCH ANY USER-SPECIFIC OPTIONS FROM e.ini:
 
@@ -77,8 +88,10 @@ my $curdir = &cwd();
 $curdir .= '/'  unless ($curdir =~ m#\/$#o);
 $_ = ($0 =~ m#\/([^\/]+)$#o) ? $1 : $0;;
 s/(\w+)\.\w+$/$1\.ini/g;
+%mimeTypes = ();
 
 while ($curdir) {
+print STDERR "-0: trying (${curdir}$_)!\n"  if ($debug);
 	last  if (-r "${curdir}$_");
 	chop $curdir;
 	last  unless ($curdir);
@@ -89,8 +102,10 @@ unless ($curdir)
 {
 	$_ = $0;
 	s/(\w+)\.\w+$/$1\.ini/g;
+print STDERR "----2: (look in program dir): ini=$_=\n"  if ($debug);
 }
 
+print STDERR "-3: will use (${curdir}$_)!\n"  if ($debug);
 if (open PROFILE, "${curdir}$_")
 {
 	while (<PROFILE>)
@@ -100,14 +115,34 @@ if (open PROFILE, "${curdir}$_")
 		s/^\s+//o;
 		next  if (/^\#/o);
 		($opt, $val) = split(/\=/o, $_, 2);
-		${$opt} = $val  if ($opt && !defined(${$opt}));
+		if ($opt =~ /^\$/o)
+		{
+			eval "$opt = \"$val\";";
+		}
+		else
+		{
+			${$opt} = $val  if ($opt && !defined(${$opt}));
+		}
 	}
 	close PROFILE;
 }
+
+if ($0 =~ /exe$/io)   #FETCH COMMAND-LINE OPTIONS SINCE "-s" DOES NOT WORK IN PAR .exe'S?!
+{
+	my ($arg, $var, $val);
+	while ($#ARGV >= 0 && $ARGV[0] =~ /^\-/o)
+	{
+		($arg = shift) =~ s/^\-//o;
+		($var, $val) = split(/\=/o, $arg);
+		$val = 1  unless (length $val);
+		eval "\$$var = \"$val\"";
+	
+	}
+}
+
 eval 'use Tk::ROText; 1';
 if ($v)
 {
-#print "-V viewer=$viewer=\n";
 	eval 'use Tk::XMLViewer; $haveXML = 1; 1';
 	eval 'use Tk::Text::ROSuperText; $SuperText = 1; $AnsiColor = 1; 1';
 	eval 'use Tk::ROTextANSIColor; $AnsiColor = 1; 1'  unless ($SuperText || $viewer =~ /texthighlight/i);
@@ -119,19 +154,29 @@ if ($v)
 	elsif ($viewer)
 	{
 		eval "use Tk::$viewer; 1";
+		if ($viewer =~ /SuperText/o)
+		{
+			$SuperText = 1;
+			$viewer = '';
+		}
 	}
+print STDERR "-???- viewer=$viewer= st=$SuperText= ac=$AnsiColor=\n"  if ($debug);
 }
 else
 {
 	if ($editor eq 'TextHighlight')
 	{
 		eval 'use Tk::TextHighlight; $haveTextHighlight = 1; 1';
-#		eval 'use Tk::CoolText::$cooltext; 1'  if ($cooltext);
 		eval 'use Tk::TextHighlight::PerlCool; $havePerlCool = 1; 1';
 	}
 	elsif ($editor)
 	{
 		eval "use Tk::$editor; 1";
+		if ($editor =~ /SuperText/o)
+		{
+			$SuperText = 1;
+			$editor = '';
+		}
 	}
 	else
 	{
@@ -145,31 +190,47 @@ require 'getopts.pl';
 require 'JCutCopyPaste.pl';
 
 %extraOptsHash = ();
-#print "-???- codetext=$codetext=\n";
+unless (defined $focus)
+{
+	$focus = 1  if ($ARGV[1]);
+}
+$focus ||= 0;
+$focustab ||= $notabs ? '' : 'Tab1';
+
+print "-???- codetext=$codetext=\n"  if ($debug);
 if ($haveTextHighlight)
 {
 	my $spacesperTab = $tabspacing || 3;
 	my $tspaces = ' ' x $spacesperTab;
-	%{$extraOptsHash{texthighlight}} = (-syntax => ($codetext||$havePerlCool), -autoindent => 1, -rulesdir => ($codetextdir||$ENV{HOME}),
-			-indentchar => ($notabs ? $tspaces : "\t")
+	%{$extraOptsHash{texthighlight}} = (-syntax => ($codetext||$havePerlCool), 
+			-autoindent => 1, 
+			-rulesdir => ($codetextdir||$ENV{HOME}),
+			-indentchar => ($notabs ? $tspaces : "\t"),
+			-highlightInBackground => (defined $hib) ? $hib : 1
 	);
-	%{$extraOptsHash{ROTextHighlight}} = (-syntax => ($codetext||$havePerlCool), -autoindent => 1, -rulesdir => ($codetextdir||$ENV{HOME}),
-			-indentchar => ($notabs ? $tspaces : "\t")
+	%{$extraOptsHash{rotexthighlight}} = (-syntax => ($codetext||$havePerlCool), 
+			-autoindent => 1, 
+			-rulesdir => ($codetextdir||$ENV{HOME}),
+			-indentchar => ($notabs ? $tspaces : "\t"),
+			-highlightInBackground => (defined $hib) ? $hib : 1
 	);
 }
 
 #eval 'require "BindMouseWheel.pl"; $WheelMouse = 1; 1';
-eval
+if ($SuperText)    #OTHER TEXT WIDGETS DON'T NEED THIS!
 {
-	require "BindMouseWheel.pl"; $WheelMouse = 1;
-};
+eval
+	{
+		require "BindMouseWheel.pl"; $WheelMouse = 1;
+	};
+}
 #print "-eval returned =$@=  wm=$WheelMouse= package=".__PACKAGE__."=\n";
 
 use Tk::JFileDialog;
 
 #-----------------------
 
-$vsn = '4.42';
+$vsn = '5.12';
 
 $editmode = 'Edit';
 if ($v)
@@ -179,25 +240,31 @@ if ($v)
 #	$haveTextHighlight = 0;
 }
 
-$bummer = 1  if ($^O =~ /Win/);
 $pgmhome = $0;
 $pgmhome =~ s#[^/]*$##;  #SET NAME TO SQL.PL FOR ORAPERL!
 $pgmhome ||= './';
-$pgmhome .= '/'  unless ($pgmhome =~ m#/$#);
-$pgmhome = 'c:/perl/bin/'  if ($bummer && $pgmhome =~ /^\.[\/\\]$/);
+$pgmhome .= '/'  unless ($pgmhome =~ m#/$#o);
+$pgmhome = 'c:/perl/bin/'  if ($bummer && $pgmhome =~ /^\.[\/\\]$/o);
+print "-at 2: pgmhome=$pgmhome=\n"  if ($debug);
+my (%cmdfile, %marklist, %opsysList, %alreadyHaveXMLMenu, %activeWindows, %text1Hash);
+my (%scrnCnts, %saveStatus);
+my $nextTab = '1';
 
 $hometmp = (-w "${homedir}tmp") ? "${homedir}tmp" : '/tmp';
-#$hometmp =~ s#\/#\\#g  if ($bummer);  #CHGD. TO NEXT. 20050401.
+$dirsep = '/';
 if ($bummer)
 {
-	$hometmp =~ s#\/#\\#g;
-	$hometmp = '\\' . $hometmp  unless ($hometmp =~ m#^(?:\\|\w\:)#);
+	$hometmp =~ s#\/#\\#go;
+	$hometmp = '\\' . $hometmp  unless ($hometmp =~ m#^(?:\\|\w\:)#o);
 	unless (-w $hometmp)
 	{
-		$hometmp = 'C:' . $hometmp  unless ($hometmp =~ m#^\w\:#);
-		$hometmp =~ s/^\w\:/C\:/  unless (-w $hometmp);
+		$hometmp = 'C:' . $hometmp  unless ($hometmp =~ m#^\w\:#o);
+		$hometmp =~ s/^\w\:/C\:/o  unless (-w $hometmp);
+		$hometmp =~ s#\/#\\#gso;
 	}
+	$dirsep = '\\';
 }
+#print "-???- hometmp=$hometmp=\n";
 $startpath = '.';
 @fnkeyText = (0);
 $srchopts = '-nocase';
@@ -207,11 +274,12 @@ $srchopts = '-nocase';
 $srchTextVar = '';
 $markSelected = '';
 
-##if ($bummer)
-eval {$host = `uname -n` || 'Windows';};
+my $markMenuTop = $bummer ? 1 : 2;
+eval {$host = $bummer ? 'Windows' : `uname -n`;};
 chomp($host);
 $host ||= 'Windows';
 $titleHeader = "${host}: Perl/Tk Editor v$vsn";
+print "-???- open=${pgmhome}myefonts=\n"  if ($debug);
 if (($f && open(T, $f)) || open(T, ".myefonts") 
 		|| open (T, "${homedir}.myefonts") || open (T, "${pgmhome}myefonts"))
 {
@@ -219,15 +287,16 @@ if (($f && open(T, $f)) || open(T, ".myefonts")
 	while (<T>)
 	{
 		chomp;
-		next  if (/^\#/);
-		($fontnames[$i], $fixedfonts[$i]) = split(/\:/);
-		$fixedfonts[$i] =~ s/\#.*$//;
+		next  if (/^\#/o);
+		($fontnames[$i], $fixedfonts[$i]) = split(/\:/o);
+		$fixedfonts[$i] =~ s/\#.*$//o;
 		$i++;
 	}
 	close T;
 }
 else
 {
+print "-???- COULD NOT OPEN EFONTS!\n"  if ($debug);
 	$fixedfonts[0] = '-*-lucida console-medium-r-normal-*-17-*-*-*-*-*-*-*';
 	$fixedfonts[1] = '-*-lucida console-medium-r-normal-*-10-*-*-*-*-*-*-*';
 	$fixedfonts[2] = '-*-lucida console-medium-r-normal-*-14-*-*-*-*-*-*-*';
@@ -257,8 +326,8 @@ $popGeometry = 0;
 $histFile ||= ($v && -e "${homedir}.myvhist") ? "${homedir}.myvhist" : "${homedir}.myehist";
 $pathFile ||= ($v && -e "${homedir}.myvpaths") ? "${homedir}.myvpaths" : "${homedir}.myepaths";
 $backupct = 0;
-$marklist[0] = ':insert:sel:';
-$marklist[1] = ':insert:sel:';
+$marklist{''}[0] = ':insert:sel:';
+$marklist{''}[1] = ':insert:sel:';
 
 $fixedfont = '';
 if (defined($tf))      #TINY FONT.
@@ -287,7 +356,7 @@ elsif (defined($fn))   #FONT NUMBER SPECIFIED.
 }
 elsif (defined($font)) #USER-SELECTED FONT.
 {
-	if ($font =~ /^\d+$/)
+	if ($font =~ /^\d+$/o)
 	{
 		$fixedfont = $fixedfonts[$font];
 	}
@@ -313,9 +382,15 @@ else                   #NORMAL FONT.
 $MainWin = MainWindow->new;
 #$MainWin->geometry("+1+1");
 $MainWin->title($titleHeader);
+
+my $ebackupFid;
+print "-???- local=${homedir}.ebackups= pgm=${pgmhome}ebackups=\n"  if ($debug);
+$ebackupFid = "${homedir}.ebackups"  if (-f "${homedir}.ebackups" && -w "${homedir}.ebackups");
+$ebackupFid ||= "${pgmhome}ebackups"  if (-f "${pgmhome}ebackups" && -w "${pgmhome}ebackups");
+
 $c = $palette  if ($palette);
 my $fgisblack;
-$fgisblack = 1  if ($fg =~ /black/i); #KLUDGE SINCE SETPALETTE/SUPERTEXT BROKE!
+$fgisblack = 1  if ($fg =~ /black/io); #KLUDGE SINCE SETPALETTE/SUPERTEXT BROKE!
 
 $bgOrg = $bg;
 $fgOrg = $fg;
@@ -323,7 +398,7 @@ if ($c)
 {
 	unless ($c eq 'none')
 	{
-		if ($c =~ /default/i)  #ADDED 20040827 TO ALL TEXT COLOR TO CHG W/O CHANGING PALETTE.
+		if ($c =~ /default/io)  #ADDED 20040827 TO ALL TEXT COLOR TO CHG W/O CHANGING PALETTE.
 		{
 			eval { $MainWin->optionReadfile('~/.Xdefaults') or $MainWin->optionReadfile('/etc/Xdefaults'); };
 			my $c0;
@@ -371,12 +446,12 @@ else
 			while (<T>)
 			{
 				chomp;
-				if ($v && /tkVpalette\s*\=\s*\"([^\"]+)\"/)
+				if ($v && /tkVpalette\s*\=\s*\"([^\"]+)\"/o)
 				{
 					$c = $1;
 					last;
 				}
-				if (/tkPalette\s*\=\s*\"([^\"]+)\"/)
+				if (/tkPalette\s*\=\s*\"([^\"]+)\"/o)
 				{
 					$c = $1;
 					last;
@@ -393,9 +468,12 @@ else
 	}
 	if ($v)
 	{
-		$c ||= 'bisque3';
-		$foreground ? $MainWin->setPalette(background => $c, foreground => $foreground)
-				: $MainWin->setPalette($c)
+#		$c ||= 'bisque3';
+		if ($c)
+		{
+			$foreground ? $MainWin->setPalette(background => $c, foreground => $foreground)
+					: $MainWin->setPalette($c)
+		}
 	}
 	else
 	{
@@ -414,7 +492,8 @@ $textwidget = $editor  if ($editor);
 
 if ($v)
 {
-	$viewer ||= 'XMLViewer'  if ($haveXML && $ARGV[0] =~ /\.(?:xml|xsd|xsl)$/i);
+print STDERR "-???- xml=$xml= have=$haveXML=\n"  if ($debug);
+	$viewer ||= 'XMLViewer'  if ($haveXML && ($xml || (!$noxml && $ARGV[0] =~ /\.(?:xml|xsd|xsl)$/io)));
 	$textwidget = $viewer;
 	unless ($textwidget)
 	{
@@ -422,124 +501,27 @@ if ($v)
 		$textwidget = 'ROTextANSIColor'  if ($AnsiColor && !$noac);
 		$textwidget = 'ROSuperText'  if ($SuperText);
 	}
-	$SuperText = 0  if ($viewer && $viewer !~ /supertext/i);
-	$AnsiColor = 0  unless ($textwidget =~ /^(?:ROSuperText|ROTextANSIColor)$/);
+	$SuperText = 0  if ($viewer && $viewer !~ /supertext/io);
+	$AnsiColor = 0  unless ($textwidget =~ /^(?:ROSuperText|ROTextANSIColor)$/o);
 }
 else
 {
-	$SuperText = 0  if ($editor && $editor !~ /supertext/i);
-	$AnsiColor = 0  unless ($textwidget =~ /^(?:SuperText|TextANSIColor)$/);
+	$SuperText = 0  if ($editor && $editor !~ /supertext/io);
+	$AnsiColor = 0  unless ($textwidget =~ /^(?:SuperText|TextANSIColor)$/o);
 }
 my ($mytextrelief) = 'sunken';
 $mytextrelief = 'groove'  if ($v);
 $bottomFrame = $MainWin->Frame;
 $lognbtnFrame = $bottomFrame->Frame;
-$text1Frame = $bottomFrame->Frame;
-#%nextwrap = ('none' => 'Wrap word', 'word' => 'Wrap char', 'char' => 'Wrap none');
+#$text1Frame = $bottomFrame->Frame;
 $wrap = 'none'  unless (defined($wrap));
 $tagcnt = 0;
 
 my $newsupertext;
-if ($SuperText && !$noac && !$v)
-{
-	$textsubwidget = $SuperText ? 'supertext' : 'textundo';
-#print "-???e- textwidget=$textwidget=\n";
-	$textScrolled[0] = $text1Frame->Scrolled($textwidget,
-			-scrollbars => 'se', -ansicolor => 1);
-	$textAdjuster = $text1Frame->Adjuster();
-	$textScrolled[1] = $text1Frame->Scrolled($textwidget,
-			-scrollbars => 'se', -ansicolor => 1);
-	$newsupertext = 1;
-}
-unless ($newsupertext)
-{
-	$textScrolled[0] = $text1Frame->Scrolled($textwidget,
-			-scrollbars => 'se');
-	$textAdjuster = $text1Frame->Adjuster();
-	$textScrolled[1] = $text1Frame->Scrolled($textwidget,
-			-scrollbars => 'se');
-}
-Tk::Autoscroll::Init($textScrolled[0])  if ($autoScroll);
-&BindMouseWheel($textScrolled[0])  if ($WheelMouse);
-&BindMouseWheel($textScrolled[1])  if ($WheelMouse);
+#my @tabb;
 
-if ($v)
-{
-	$textsubwidget = ($AnsiColor && !$noac) ? 'rotextansicolor' : 'rotext';
-	$textsubwidget = 'rosupertext'  if $SuperText;
-	$textsubwidget = "\L$viewer\E"  if ($viewer);
-	$text1Text = $textScrolled[0]->Subwidget($textsubwidget);
-	$textScrolled[0]->Subwidget($textsubwidget)->configure(
-			-setgrid=> 1,
-			-font	=> $fixedfont,
-		#-font	=> '-*-lucida console-medium-r-normal-*-18-*-*-*-*-*-*-*',
-			-tabs	=> ['1.35c','2.7c','4.05c'],
-			-insertbackground => 'white',
-			-relief => $mytextrelief,
-			-wrap	=> $wrap,
-			-height => $height,
-			-width  => $width, %{$extraOptsHash{$textsubwidget}});
-	$textScrolled[1]->Subwidget($textsubwidget)->configure(
-			-setgrid=> 1,
-			-font	=> $fixedfont,
-		#-font	=> '-*-lucida console-medium-r-normal-*-18-*-*-*-*-*-*-*',
-			-tabs	=> ['1.35c','2.7c','4.05c'],
-			-insertbackground => 'white',
-			-relief => $mytextrelief,
-			-wrap	=> $wrap,
-			-height => $height,
-			-width  => $width, %{$extraOptsHash{$textsubwidget}});
-	$textScrolled[0]->Subwidget($textsubwidget)->configure(
-			-background => $bg)  if ($bg);
-	$textScrolled[0]->Subwidget($textsubwidget)->configure(
-			-foreground => $fg)  if ($fgisblack || ($fg && $fg !~ /black/i));
-	$textScrolled[1]->Subwidget($textsubwidget)->configure(
-			-background => $bg)  if ($bg);
-	$textScrolled[1]->Subwidget($textsubwidget)->configure(
-			-foreground => $fg)  if ($fgisblack || ($fg && $fg !~ /black/i));
-}
-else
-{
-	$textsubwidget = $SuperText ? 'supertext' : 'textundo';
-	$textsubwidget = "\L$editor\E"  if ($editor);
-	$text1Text = $textScrolled[0]->Subwidget($textsubwidget);
-	$textScrolled[0]->Subwidget($textsubwidget)->configure(
-			-setgrid=> 1,
-			-font	=> $fixedfont,
-			-tabs	=> ['1.35c','2.7c','4.05c'],
-			-insertbackground => 'white',
-			-relief => $mytextrelief,
-			-wrap	=> $wrap,
-			-height => $height,
-			-width  => $width, %{$extraOptsHash{$textsubwidget}});
-	$textScrolled[1]->Subwidget($textsubwidget)->configure(
-			-setgrid=> 1,
-			-font	=> $fixedfont,
-			-tabs	=> ['1.35c','2.7c','4.05c'],
-			-insertbackground => 'white',
-			-relief => $mytextrelief,
-			-wrap	=> $wrap,
-			-height => $height,
-			-width  => $width, %{$extraOptsHash{$textsubwidget}});
-	$textScrolled[0]->Subwidget($textsubwidget)->configure(
-			-background => $bg)  if ($bg);
-	$textScrolled[0]->Subwidget($textsubwidget)->configure(
-			-foreground => $fg)  if ($fgisblack || ($fg && $fg !~ /black/i));
-	$textScrolled[1]->Subwidget($textsubwidget)->configure(
-			-background => $bg)  if ($bg);
-	$textScrolled[1]->Subwidget($textsubwidget)->configure(
-			-foreground => $fg)  if ($fgisblack || ($fg && $fg !~ /black/i));
-	#THIS KLUDGE NECESSARY BECAUSE DUAL-SPEED SETPALETTE BROKEN ON WINDOZE!
-}
-if ($haveTextHighlight && ($editor =~ /texthighlight/io || $viewer =~ /texthighlight/io))
-{
-	my $sections;
-	($sections, $kateExtensions) = $textScrolled[0]->Subwidget($textsubwidget)->fetchKateInfo;
-	$textScrolled[0]->Subwidget($textsubwidget)->addKate2ViewMenu($sections);
-	$textScrolled[1]->Subwidget($textsubwidget)->addKate2ViewMenu($sections);
-}
+&newTabFn();
 
-$whichTextWidget = $textScrolled[0]->Subwidget($textsubwidget);
 
 #$textColorer = $MainWin->ColorEditor(-title => 'Select your favorite colors!');
 #		unless ($bummer);
@@ -554,25 +536,35 @@ my $fileMenubtn = $w_menu->Menubutton(
 		-underline => 0);
 $fileMenubtn->command(
 		-label => 'New',
-		-underline =>0,
+		-underline => 0,
 		-command => \&newFn);
+unless ($nobrowsetabs)
+{
+	$fileMenubtn->command(
+			-label => 'New Tab',
+			-underline => 4,
+			-command => [\&newTabFn, 1]);
+	$fileMenubtn->command(
+			-label => 'Delete Tab',
+			-underline => 4,
+			-command => \&deleteTabFn);
+}
 $fileMenubtn->command(
 		-label => 'Open',
-		-underline =>0,
+		-underline => 0,
 		-command => \&openFn);
 $fileMenubtn->command(
 		-label => 'Save',
-		-underline =>0,
+		-underline => 0,
 		-command => \&saveFn);
 $fileMenubtn->command(
 		-label => ($v ? 'Save Marks/Tags' : 'Save w/Marks'),
 		-underline => ($v ? 5 : 7),
-#		-command => [\&saveFn, 3]);
 		-command => sub { 
 			if ($v)
 			{
-				&saveTags($cmdfile[$activeWindow]);
-				&saveMarks($cmdfile[$activeWindow], $activeWindow);
+				&saveTags($cmdfile{$activeTab}[$activeWindow]);
+				&saveMarks($cmdfile{$activeTab}[$activeWindow], $activeWindow);
 			}
 			else
 			{
@@ -597,7 +589,11 @@ $fileMenubtn->command(
 		-command => [\&showbkupFn]);
 $fileMenubtn->command(
 		-label => 'Split screen',
-		-command => [\&splitScreen]);
+		-command => [\&splitScreen, 1]);
+$fileMenubtn->command(
+		-label => 'Single screen',
+		-command => [\&splitScreen],
+		-state => 'disabled');
 $fileMenubtn->command(
 		-label => $nb ? 'Turn on backup' : 'Turn OFF backup',
 		-command => [\&toggleNB]);
@@ -613,46 +609,21 @@ $fileMenubtn->command(
 		-label => 'use C',
 		-underline =>4,
 		-command => [\&resetFileType, 1]);
-$scrnCnt = 1;
+$scrnCnts{''} = 1;
 $fileMenubtn->separator;
 if ($v)
 {
 	$fileMenubtn->command(
 			-label => 'Edit w/E',
-			-command => sub {
-				for (my $i=0;$i<=1;$i++)
-				{
-					if ($cmdfile[$i])
-					{
-						&saveTags($cmdfile[$i]);
-						&saveMarks($cmdfile[$i], $i);
-					}
-				}
-				my $curposn = $textScrolled[$activeWindow]->index('insert');
-				my $cmd = $0;
-				$cmd =~ s/\bv([\w\.]*)/e$1/;
-				exec "$cmd -nb -l=$curposn -focus=$activeWindow $cmdfile[0] $cmdfile[1]";
-			});
+			-command => [\&switchPgm, 1],
+	);
 }
 else
 {
 	$fileMenubtn->command(
 			-label => 'View w/V',
-			-command => sub {
-				for (my $i=0;$i<=1;$i++)
-				{
-					if ($cmdfile[$i])
-					{
-						&saveTags($cmdfile[$i]);
-						&saveMarks($cmdfile[$i], $i);
-					}
-				}
-				&exitFn($No, 'NOEXIT');
-				my $curposn = $textScrolled[$activeWindow]->index('insert');
-				my $cmd = $0;
-				$cmd =~ s/\be([\w\.]*)/v$1/;
-				exec "$cmd -nb -l=$curposn -focus=$activeWindow $cmdfile[0] $cmdfile[1]";
-			});
+			-command => [\&switchPgm, 0]
+	);
 }
 $fileMenubtn->command(
 		-label => 'Exit',
@@ -686,14 +657,35 @@ $editMenubtn->separator;
 $editMenubtn->command(-label => 'Colors',   -underline =>1, -command => [\&doColorEditor]);
 #		unless ($bummer);
 $editMenubtn->command(-label => 'Insert file',   -underline =>0, -command => [\&appendfile]);
+$editMenubtn->command(-label => 'Edit This',   -underline =>1, -command => [\&editfile])
+		if ($v);
 $editMenubtn->command(-label => 'Undo',
 		-underline =>0,
 		-accelerator => 'Alt-u',
-		-command => sub {$textScrolled[$activeWindow]->undo;});
+		-command => sub {
+				eval { $whichTextWidget->tagDelete('savesel'); };
+				eval { $whichTextWidget->tagAdd('savesel', 'sel.first', 'sel.last'); };
+				$textScrolled[$activeWindow]->undo;
+				eval { $whichTextWidget->tagAdd('sel', 'savesel.first', 'savesel.last'); };
+		}
+);
+$editMenubtn->command(-label => 'Redo',
+		-underline => 2,
+		-accelerator => 'Alt-r',
+		-command => sub {
+				eval { $whichTextWidget->tagDelete('savesel'); };
+				eval { $whichTextWidget->tagAdd('savesel', 'sel.first', 'sel.last'); };
+				$textScrolled[$activeWindow]->redo;
+				eval { $whichTextWidget->tagAdd('sel', 'savesel.first', 'savesel.last'); };
+		}
+);
+$editMenubtn->entryconfigure('Undo', -state => 'disabled')
+		unless ($text1Text->can('undo'));
+$editMenubtn->entryconfigure('Redo', -state => 'disabled')
+		unless ($text1Text->can('redo'));
 
-$editMenubtn->command(-label => 'Left-indent', -underline => 0, -command => [\&doIndent,0]);
-$editMenubtn->command(-label => 'Right-indent', -underline => 0, -command => [\&doIndent,1]);
-#$editMenubtn->command(-label => $nextwrap{$wrap}, -underline => 0, -command => [\&setwrap]);
+$editMenubtn->command(-label => 'Left-indent', -underline => 0, -command => [\&doIndent,0,1]);
+$editMenubtn->command(-label => 'Right-indent', -underline => 0, -command => [\&doIndent,1,1]);
 $editMenubtn->command(-label => 'Lower-case', -command => [\&setcase,1]);
 $editMenubtn->command(-label => 'Upper-case', -command => [\&setcase,0]);
 $editMenubtn->command(-label => 'Length', -underline => 2, -command => [\&showlength]);
@@ -720,19 +712,24 @@ $markMenubtn = $w_menu->Menubutton(
 		-underline => 3);
 $markMenubtn->pack(-side=>'left');
 $markMenubtn->command(
+		-label => 'Clear Marks',
+		-underline => 0,
+		-command => \&clearMarks);
+$markMenubtn->command(
 		-label => 'New Mark',
 		-underline => 0,
 		-command => \&addMark);
 
-$markMenuHash{'Clear Marks'}->{index} = 0;
-$markMenuHash{'Clear Marks'}->{underline} = 0;
-$markMenuHash{'Clear Marks'}->{command} = \&clearMarks;
-$markMenuIndex[0] = 'Clear Marks';
-$markMenuHash{'New Mark'}->{index} = 1;
-$markMenuHash{'New Mark'}->{underline} = 0;
-$markMenuHash{'New Mark'}->{command} = \&addMark;
-$markMenuIndex[1] = 'New Mark';
-$markNextIndex = 2;
+my (%markNextIndex);
+#x$markMenuHash{''}{'Clear Marks'}->{index} = 0;
+#x$markMenuHash{''}{'Clear Marks'}->{underline} = 0;
+#x$markMenuHash{''}{'Clear Marks'}->{command} = \&clearMarks;
+#x$markMenuIndex{''}[0] = 'Clear Marks';
+#x$markMenuHash{''}{'New Mark'}->{index} = 1;
+#x$markMenuHash{''}{'New Mark'}->{underline} = 0;
+#x$markMenuHash{''}{'New Mark'}->{command} = \&addMark;
+#x$markMenuIndex{''}[1] = 'New Mark';
+#xxxxx$markNextIndex{''} = 2;
 
 $fontMenubtn = $w_menu->Menubutton(
 		-text => 'Fonts');
@@ -753,7 +750,7 @@ if (open (T, ".myethemes") || open (T, "${homedir}.myethemes")
 	while (<T>)
 	{
 		chomp;
-		($themename, $themecode) = split(/\:/);
+		($themename, $themecode) = split(/\:/o);
 		$themeHash{$themename} = $themecode;
 		eval "\$themeMenuBtn->command(-label => '$themename', -command => sub {&setTheme('$themecode');});";
 	}
@@ -786,12 +783,8 @@ if (open (T, ".myethemes") || open (T, "${homedir}.myethemes")
 
 if ($v)
 {
-#	$tagMenubtn = $w_menu->Menubutton(
-#			-text => 'Tags',
-#			-state => 'disabled');
-#	$tagMenubtn->pack(-side=>'left');
 	$fnMenubtn = $w_menu->Menubutton(
-			-text => 'Fn',
+			-text => 'Fun',
 			-state => 'disabled');
 	$fnMenubtn->pack(-side=>'left');
 
@@ -799,20 +792,25 @@ if ($v)
 else
 {
 	$fnMenubtn = $w_menu->Menubutton(
-			-text => 'Fn'
+			-text => 'Fun',
+			-underline => 1,
 	);
 	$fnMenubtn->pack(-side=>'left');
-	for (my $i=1;$i<=5;$i++)
+	for (my $i=1;$i<=12;$i++)
 	{
 		if (defined($fnkeyText[$i]) && length($fnkeyText[$i]) > 0)
 		{
-			$fnMenubtn->command(-label => ("F$i: \"".substr($fnkeyText[$i],0,10).'"'), -underline => 1, -command => [\&doGetFnKey, $i]);
+			$fnMenubtn->command(-label => ("F$i: \"".substr($fnkeyText[$i],0,20).'"'), -underline => 1, -command => [\&doGetFnKey, $i]);
 		}
 		else
 		{
 			$fnMenubtn->command(-label => "F$i: <undef>", -underline => 1, -command => [\&doGetFnKey, $i]);
 		}
 	}
+	$fnMenubtn->separator;
+	$fnMenubtn->command(-label => "Clear", -underline => 0, -command => [\&doClearFnKeys]);
+	$fnMenubtn->command(-label => "Load",  -underline => 0, -command => [\&doLoadFnKeys]);
+	$fnMenubtn->command(-label => "Save",  -underline => 0, -command => [\&doSaveFnKeys]);
 }
 
 $MainWin->title("$titleHeader, ${editmode}ing:  --untitled--");
@@ -827,33 +825,43 @@ $text1Frame->pack(
 		-expand	=> 'yes',
 		-fill   => 'both',
 		-padx   => '2m',
-		-pady   => '1m');
+		-pady   => '1m')  if ($nobrowsetabs);
 
-$text1Frame->packPropagate('1');
-$textScrolled[0]->packPropagate('1');
-$textScrolled[1]->packPropagate('1');
-$textScrolled[0]->pack(
-		-side   => 'bottom',
-		-expand => 'yes',
-		-fill   => 'both');
+$tabbedFrame->pack(
+		-side		=> 'left',
+		-expand	=> 'yes',
+		-fill   => 'both',
+		-padx   => '2m',
+		-pady   => '1m')  unless ($nobrowsetabs);
 
-$textScrolled[1]->pack(
-		-side   => 'bottom',
-		-expand => 'yes',
-		-fill   => 'both');
-
-$textAdjuster->packForget();
-#$textScrolled[1]->packConfigure(-side => 'bottom', -expand => 'yes', -fill => 'both');
-$textScrolled[1]->packForget();
-
-if ($bummer && $w32dnd)
+if ($nobrowsetabs)
 {
-	$textScrolled[0]->DropSite(-dropcommand => [\&accept_drop, $textScrolled[0]],
-		               -droptypes => 'Win32');
-}
+	$text1Frame->packPropagate('1');
+	$textScrolled[0]->packPropagate('1');
+	$textScrolled[1]->packPropagate('1');
+	$textScrolled[0]->pack(
+			-side   => 'bottom',
+			-expand => 'yes',
+			-fill   => 'both');
 
-#$textColorer->configure(
-#		-widgets=> [$text1Text, $textScrolled[$activeWindow]->Descendants])  unless ($bummer);
+	$textScrolled[1]->pack(
+			-side   => 'bottom',
+			-expand => 'yes',
+			-fill   => 'both');
+
+	$textAdjuster->packForget();
+#$textScrolled[1]->packConfigure(-side => 'bottom', -expand => 'yes', -fill => 'both');
+	$textScrolled[1]->packForget();
+
+	if ($bummer && $w32dnd)
+	{
+		$textScrolled[0]->DropSite(-dropcommand => [\&accept_drop, $textScrolled[0]],
+			               -droptypes => 'Win32');
+	}
+
+#	$textColorer->configure(
+#			-widgets=> [$text1Text, $textScrolled[$activeWindow]->Descendants])  unless ($bummer);
+}
 
 $statusLabel = $MainWin->Label(
 		-justify=> 'left',
@@ -865,39 +873,6 @@ $statusLabel->pack(-side => 'bottom',
 		-padx	=> '2m',
 		-pady	=> '1m');
 
-$textScrolled[0]->bind('<FocusIn>' => sub {
-		&textfocusin; $activeWindow = 0;
-		$whichTextWidget = $textScrolled[0]->Subwidget($textsubwidget);
-		$MainWin->title("$titleHeader, ${editmode}ing:  \"$cmdfile[$activeWindow]\"");
-		$opsys = $opsysList[$activeWindow];
-});
-$textScrolled[0]->bind('<Alt-l>' => [\&shocoords,0]);
-$textScrolled[0]->bind('<F1>' => [\&doFnKey,1]);
-$textScrolled[0]->bind('<F2>' => [\&doFnKey,2]);
-$textScrolled[0]->bind('<F3>' => [\&doFnKey,3]);
-$textScrolled[0]->bind('<F4>' => [\&doFnKey,4]);
-$textScrolled[0]->bind('<F5>' => [\&doFnKey,5]);
-$textScrolled[1]->bind('<FocusIn>' => sub {
-		&textfocusin; $activeWindow = 1;
-		$whichTextWidget = $textScrolled[1]->Subwidget($textsubwidget);
-		$MainWin->title("$titleHeader, ${editmode}ing:  \"$cmdfile[$activeWindow]\"");
-		$opsys = $opsysList[$activeWindow];
-});
-$textScrolled[1]->bind('<Alt-l>' => [\&shocoords,0]);
-$textScrolled[1]->bind('<F1>' => [\&doFnKey,1]);
-$textScrolled[1]->bind('<F2>' => [\&doFnKey,2]);
-$textScrolled[1]->bind('<F3>' => [\&doFnKey,3]);
-$textScrolled[1]->bind('<F4>' => [\&doFnKey,4]);
-$textScrolled[1]->bind('<F5>' => [\&doFnKey,5]);
-if ($SuperText == 1 || $editor =~ /texthighlight/io)
-{
-	$textScrolled[0]->bind('<Control-p>' => sub
-	{
-			$textScrolled[0]->Subwidget($textsubwidget)->markSet('_prev','insert');
-			$textScrolled[0]->Subwidget($textsubwidget)->jumpToMatchingChar();
-			&shocoords(0);
-	});
-}
 $openButton = $lognbtnFrame->Button(
 		-text => 'Open',
 		-underline =>0,
@@ -945,8 +920,8 @@ $markButton = $lognbtnFrame->Button(
 $markButton->pack(-side=>'left', -expand => 1,);
 
 $opsys = ($bummer) ? 'DOS' : 'Unix';
-$opsysList[0] = $opsys;
-$opsysList[1] = $opsys;
+$opsysList{''}[0] = $opsys;
+$opsysList{''}[1] = $opsys;
 
 $asdosButton = $lognbtnFrame->JBrowseEntry(
 		-label => '',
@@ -957,7 +932,7 @@ $asdosButton = $lognbtnFrame->JBrowseEntry(
 		-relief => 'sunken',
 		-takefocus => 0,
 		-browse => 1,
-		-browsecmd => sub { $opsysList[$activeWindow] = $opsys },
+		-browsecmd => sub { $opsysList{$activeTab}[$activeWindow] = $opsys },
 		-noselecttext => 1);
 $asdosButton->pack(
 		-side   => 'left',
@@ -992,8 +967,6 @@ $findMenubtn->entryconfigure('Modify search', -state => 'disabled');
 
 $againButton->configure(-state => 'disabled');
 $bkagainButton->configure(-state => 'disabled');
-
-#$textScrolled[0]->focus;
 
 &setTheme($themeHash{$theme})  if ($theme && defined $themeHash{$theme});
 if ($bgOrg)   #USER SPECIFIED BOTH -theme AND -bg!
@@ -1037,19 +1010,20 @@ $errDialog = $MainWin->JDialog(
 
 if ($ARGV[0])
 {
-	$ARGV[0] =~ s/^file://;  #HANDLE KFM DRAG&DROP!
-	$ARGV[0] =~ s#\\#/#g;    #FIX Windoze FILENAMES!
+	$ARGV[0] =~ s/^file://o;  #HANDLE KFM DRAG&DROP!
+	$ARGV[0] =~ s#\\#/#go;    #FIX Windoze FILENAMES!
 
+	$activeWindow = 0;
 	if (&fetchdata($ARGV[0]))
 	{
-		$cmdfile[0] = $ARGV[0];
+		$cmdfile{''}[0] = $ARGV[0];
 		my $cmdfid = '';
-		$cmdfid = &cwd()  unless ($cmdfile[0] =~ m#^(?:\/|\w\:)# );
+		$cmdfid = &cwd()  unless ($cmdfile{''}[0] =~ m#^(?:\/|\w\:)#o );
 		if ($cmdfid)
 		{
-			$cmdfid .= '/'  unless ($cmdfid =~ m#\/$#);
+			$cmdfid .= '/'  unless ($cmdfid =~ m#\/$#o);
 		}
-		$cmdfid .= $cmdfile[0];
+		$cmdfid .= $cmdfile{''}[0];
 		$cmdfid =~ s#^\.\/#&cwd."\/"#e;
 		$cmdfid =~ s!^(\~\w*)!
 			my $one = $1 || $ENV{USER};
@@ -1058,7 +1032,7 @@ if ($ARGV[0])
 			$t;
 		!e;
 		$startpath = $cmdfid;
-		$startpath =~ s#[^\/]+$##;
+		$startpath =~ s#[^\/]+$##o;
 		my @histlist = ("$cmdfid\n");
 		if (open(T, $histFile))
 		{
@@ -1078,22 +1052,26 @@ if ($ARGV[0])
 			}
 			close T;
 		}
+		(my $filePart = $cmdfile{''}[0]) =~ s#^.*\/([^\/]+)$#$1#;
+		$tabbedFrame->pageconfigure($activeTab, -label => $filePart)  unless ($nobrowsetabs);
+#		$activeWindow = 1;
 		if ($ARGV[1])   #IF 2ND FILE SPECIFIED, SPLIT SCREEN & OPEN IN BOTTOM.
 		{
-			$cmdfile[1] = $ARGV[1];
+			$cmdfile{''}[1] = $ARGV[1];
 			&splitScreen();
 			$textScrolled[1]->focus();
+print "-???- setting focus to 1!\n"  if ($debug);
 			$activeWindow = 1;
-			$whichTextWidget = $textScrolled[1]->Subwidget($textsubwidget);
+			$whichTextWidget = $textScrolled[1]->Subwidget($textsubwidget); #  unless (defined $focus);
 			if (&fetchdata($ARGV[1]))
 			{
 				my $cmdfid = '';
-				my $cmdfid = &cwd()  unless ($cmdfile[1] =~ m#^(?:\/|\w\:)# );
+				my $cmdfid = &cwd()  unless ($cmdfile{''}[1] =~ m#^(?:\/|\w\:)#o );
 				if ($cmdfid)
 				{
-					$cmdfid .= '/'  unless ($cmdfid =~ m#\/$#);
+					$cmdfid .= '/'  unless ($cmdfid =~ m#\/$#o);
 				}
-				$cmdfid .= $cmdfile[1];
+				$cmdfid .= $cmdfile{''}[1];
 				$cmdfid =~ s#^\.\/#&cwd."\/"#e;
 				$cmdfid =~ s!^(\~\w*)!
 					my $one = $1 || $ENV{USER};
@@ -1102,7 +1080,7 @@ if ($ARGV[0])
 					$t;
 				!e;
 				$startpath = $cmdfid;
-				$startpath =~ s#[^\/]+$##;
+				$startpath =~ s#[^\/]+$##o;
 				my @histlist = ("$cmdfid\n");
 				if (open(T, $histFile))
 				{
@@ -1127,9 +1105,9 @@ if ($ARGV[0])
 	}
 	else    #ADDED 20040407 SO IF FILE ARGUMENT SPECIFIED DOES NOT EXIST, "SAVE" STILL "REMEMBERS" IT!
 	{
-		$cmdfile[0] = $ARGV[0]  if ($ARGV[0]);
+		$cmdfile{''}[0] = $ARGV[0]  if ($ARGV[0]);
 	}
-	$MainWin->title("$titleHeader, ${editmode}ing:  \"$cmdfile[0]\"");
+	$MainWin->title("$titleHeader, ${editmode}ing:  \"$cmdfile{''}[$activeWindow]\"");
 	$dontaskagain = 1  unless ($ask);
 }
 elsif (!$n && !$new)
@@ -1142,25 +1120,25 @@ elsif (!$n && !$new)
 		$textScrolled[$activeWindow]->insert('end',$clipboard);
 		$MainWin->title("$titleHeader, ${editmode}ing:  \"--SELECTED TEXT--\"");
 		$_ = "..Successfully opened Selected Text.";
-		$statusLabel->configure(-text => $_);
+		&setStatus( $_);
 		$textScrolled[$activeWindow]->markSet('insert','0.0');
 	}
 	else
 	{
 		$MainWin->title("${host}: Perl/Tk Editor, bv$vsn, ${editmode}ing:  \"--NEW DOCUMENT--\"");
 	}
-	$cmdfile[0] = '';
+	$cmdfile{''}[0] = '';
 }
 
 $filetype = 0;
 
-if ($cmdfile[0] =~ /\.c$/i || $cmdfile[0] =~ /\.h$/i || $cmdfile[0] =~ /\.cpp$/i)
+if ($cmdfile{''}[0] =~ /\.c$/io || $cmdfile{''}[0] =~ /\.h$/io || $cmdfile{''}[0] =~ /\.cpp$/io)
 {
 	#eval {require 'e_c.pl';};  #EVAL DOESN'T WORK HERE IN COMPILED VSN.
 	require 'e_c.pl';
 	$filetype = 1;
 }
-elsif ($cmdfile[0] =~ /\..*ht[a-z]+/i)
+elsif ($cmdfile{''}[0] =~ /\..*ht[a-z]+/io)
 {
 	#eval {require 'e_htm.pl';};
 	require 'e_htm.pl';
@@ -1175,23 +1153,6 @@ $fileTypes{$filetype} = 1;
 
 #!!$textScrolled[$activeWindow]->bind('<Alt-Key>',['Backspace','Insert']);
 ($text1Text,@textchildren) = $textScrolled[$activeWindow]->children;
-$text1Text->focus;
-#########$textScrolled[$activeWindow]->bind('<ButtonRelease>' => [\&shocoords,1])  if (defined($v));   #REMOVED FOR SUPERTEXT!
-#$text1Text->bind('<<MouseSelectAutoScanStop>>' => [\&shocoords,1]);  #ADDED FOR SUPERTEXT!
-#unless (defined($v))
-{
-	$textScrolled[0]->Subwidget($textsubwidget)->bind('<ButtonRelease-1>' => [\&shocoords,1]);
-	$textScrolled[1]->Subwidget($textsubwidget)->bind('<ButtonRelease-1>' => [\&shocoords,1]);
-}
-$textScrolled[0]->bind('<Alt-a>' => sub { &doSearch(0) });
-$textScrolled[1]->bind('<Alt-a>' => sub { &doSearch(0) });
-$textScrolled[$activeWindow]->markSet('insert','0.0');
-
-$activeWindow = $focus  if (defined($focus) && $focus == 0 || $focus == 1);
-$textScrolled[$activeWindow]->focus;
-&gotoMark($textScrolled[$activeWindow],$l)  if ($l);
-&doSearch(2)  if ($s);
-
 $MainWin->bind('<Alt-b>' => [\&gotoMark, '_Bookmark']);
 
 #SPECIAL CODE IF VIEWING ONLY!
@@ -1202,6 +1163,7 @@ if ($v)
 	$editMenubtn->entryconfigure('Paste (Clipboard)', -state => 'disabled');
 	$editMenubtn->entryconfigure('Paste (Primary)', -state => 'disabled');
 	$editMenubtn->entryconfigure('Undo', -state => 'disabled');
+	$editMenubtn->entryconfigure('Redo', -state => 'disabled');
 	$editMenubtn->entryconfigure('Left-indent', -state => 'disabled');
 	$editMenubtn->entryconfigure('Right-indent', -state => 'disabled');
 	$editMenubtn->entryconfigure('Insert file', -state => 'disabled');
@@ -1222,29 +1184,66 @@ if ($v)
 #NEXT 4 ADDED 20031107 FOR IMWHEEL.
 $MainWin->bind('<Alt-Left>' => sub { 
 		$textScrolled[$activeWindow]->Subwidget($textsubwidget)->xview('scroll', -1, 'units');
-#		$_ = $textScrolled[$activeWindow]->Subwidget($textsubwidget)->index('insert'); 
-#		if ($_ eq $textScrolled[$activeWindow]->Subwidget($textsubwidget)->index('insert lineend'))
-#		{
-#			$textScrolled[$activeWindow]->Subwidget($textsubwidget)->markSet('insert',"insert + 1 line linestart");
-#			$textScrolled[$activeWindow]->Subwidget($textsubwidget)->see('insert');
-#		}
 });
 $MainWin->bind('<Alt-Right>' => sub { 
 		$textScrolled[$activeWindow]->Subwidget($textsubwidget)->xview('scroll', +1, 'units');
-#		$_ = $textScrolled[$activeWindow]->Subwidget($textsubwidget)->index('insert'); 
-#		if ($_ eq $textScrolled[$activeWindow]->Subwidget($textsubwidget)->index('insert linestart'))
-#		{
-#			$textScrolled[$activeWindow]->Subwidget($textsubwidget)->markSet('insert',"insert - 1 char");
-#			$textScrolled[$activeWindow]->Subwidget($textsubwidget)->see('insert');
-#		}
 });
 $MainWin->bind('<Alt-Up>' => sub { $textScrolled[$activeWindow]->Subwidget($textsubwidget)->yview('scroll', -1, 'units') });
 $MainWin->bind('<Alt-Down>' => sub { $textScrolled[$activeWindow]->Subwidget($textsubwidget)->yview('scroll', +1, 'units') });
 
+if (defined $tab1 && !($nobrowsetabs))
+{
+	my $tabX;
+	my $i = 1;
+	while (1)
+	{
+		$tabX = '';
+		eval "\$tabX = \$tab$i  if (defined \$tab$i)";
+		last  unless ($tabX);
+		my ($topfid, $bottomfid) = split(/\:/o, $tabX);
+		&newTabFn();
+		$activeWindow = 0;
+		&openFn($topfid);
+		if ($bottomfid)
+		{
+			&splitScreen();
+			$textScrolled[1]->focus();
+			$activeWindow = 1;
+			&openFn($bottomfid);
+		}
+		++$i;
+	}
+}
+
+print "-???1- focus=$focus= aw=$activeWindow= fns=$focusNotSet\n"  if ($debug);
+unless ($focusNotSet)
+{
+	$activeWindow = ($focus == 1) ? 1 : 0;
+}
+####????$textScrolled[1]->Subwidget($textsubwidget)->focus();
+print "-???2- focus=$focus= aw=$activeWindow=\n"  if ($debug);
+if ($nobrowsetabs)
+{
+	$textScrolled[$activeWindow]->Subwidget($textsubwidget)->focus;
+}
+else
+{
+	$textScrolled[$activeWindow]->Subwidget($textsubwidget)->focus;
+	$tabbedFrame->raise($focustab);
+}
+$activeWindows{$activeTab} = $activeWindow;
+&gotoMark($textScrolled[$activeWindow],$l)  if ($l);
+if ($s)
+{
+	push (@srchTextChoices, $s);
+	$srchOptChoices{$s} = '-nocase';
+	$replTextChoices{$s} = '';
+	&doSearch(2);
+}
+
 #MainLoop;
 while (Tk::MainWindow->Count)
 {
-	#if (Exists($xpopup2))
 	if ($childpid)
 	{
 		if ($childpid)
@@ -1254,7 +1253,7 @@ while (Tk::MainWindow->Count)
 			while (@children)
 			{
 				$_ = shift(@children);
-				if (/^\D*(\d+)/)
+				if (/^\D*(\d+)/o)
 				{
 					$childstillrunning = 1  if ($1 eq $childpid);
 				}
@@ -1269,7 +1268,6 @@ while (Tk::MainWindow->Count)
 		}
 		eval { $xpopup2->update  }  if (Exists($xpopup2));
 	}
-	#$MainWin->update;
 	DoOneEvent(ALL_EVENTS);
 }
 
@@ -1279,22 +1277,417 @@ sub newFn
 	$usrres = $No;
 	unless ($v)
 	{
-		if (length($textScrolled[$activeWindow]->get('1.0','1.1')))
+		if (length($textScrolled[$activeWindow]->get('1.0','3.0')) > 1)
 		{
 			$saveDialog->configure(
-					-text => "Save any changes to $cmdfile[$activeWindow]?");
+					-text => "Save any changes to $cmdfile{$activeTab}[$activeWindow]?");
 			$usrres = $saveDialog->Show();		
-			$cmdfile[$activeWindow] ||= "$hometmp/e.out.tmp";
+			$cmdfile{$activeTab}[$activeWindow] ||= "$hometmp/e.out.tmp";
 		}
 	}
 	$_ = '';
-	$usrres = $Cancel x &writedata($cmdfile[$activeWindow])  if ($usrres eq $Yes);
+	$usrres = $Cancel x &writedata($cmdfile{$activeTab}[$activeWindow])  if ($usrres eq $Yes);
 	return  if ($usrres eq $Cancel);
-	$cmdfile[$activeWindow] = '';
+	$cmdfile{$activeTab}[$activeWindow] = '';
 	$textScrolled[$activeWindow]->delete('0.0','end');
 	&clearMarks();
-	$opsysList[$activeWindow] = $bummer ? 'DOS' : 'Unix';
+	$opsysList{$activeTab}[$activeWindow] = $bummer ? 'DOS' : 'Unix';
 	$MainWin->title("$titleHeader, ${editmode}ing:  New File");
+	unless ($activeWindow)
+	{
+		(my $numberPart = $activeTab) =~ s#\D##gs;
+		$tabbedFrame->pageconfigure($activeTab, -label => "Tab $numberPart")  unless ($nobrowsetabs);
+	}
+}
+
+sub newTabFn
+{
+	my $openDialog = shift || 0;
+
+	$activeWindow = 0;
+	if ($nobrowsetabs)
+	{
+		$text1Frame = $bottomFrame->Frame;
+		$activeTab = '';
+		$activeWindow = ($focus == 1) ? 1 : 0;
+		$activeWindows{$activeTab} = $activeWindow;
+	}
+	else
+	{
+#print "-???- nextTab=$nextTab= active=$activeTab:$activeWindow=(".$activeWindows{"Tab$nextTab"}.") f=$focus= ft=$focustab=\n";
+		$activeTab = "Tab$nextTab";
+		$activeWindow = ($focus == 1 && $activeTab eq $focustab) ? 1 : 0;
+		$activeWindows{$activeTab} = $activeWindow;
+#		my $bgcolr = $MainWin->cget( -background );    #NEXT 2 MAKE TAB ROW SAME COLOR AS REST OF WINDOW:
+		$tabbedFrame = $bottomFrame->NoteBook()  unless ($nextTab > 1);
+#		$tabbedFrame = $bottomFrame->NoteBook(-backpagecolor => $bgcolr)  unless ($nextTab > 1);
+print STDERR "-newTabFn: nextTab=$nextTab= tabbedFrame=$tabbedFrame=\n"  if ($debug);
+#		$tabb[$nextTab] = $tabbedFrame->add( $activeTab, -label=> "Tab $nextTab", -raisecmd => [\&chgTabs, $nextTab]);
+#		$text1Frame = $tabb[$nextTab];
+		$text1Frame = $tabbedFrame->add( $activeTab, -label=> "Tab $nextTab", -raisecmd => [\&chgTabs, $nextTab]);
+		++$nextTab;
+	}
+	if ($SuperText && !$noac && !$v)
+	{
+		$textsubwidget = $SuperText ? 'supertext' : 'textundo';
+		$textScrolled[0] = $text1Frame->Scrolled($textwidget,
+				-scrollbars => 'se', -ansicolor => 1);
+		$textScrolled[0]->Subwidget('xscrollbar')->configure(-takefocus => 0);
+		$textScrolled[0]->Subwidget('yscrollbar')->configure(-takefocus => 0);
+		$textAdjuster = $text1Frame->Adjuster();
+		$textScrolled[1] = $text1Frame->Scrolled($textwidget,
+				-scrollbars => 'se', -ansicolor => 1);
+		$textScrolled[1]->Subwidget('xscrollbar')->configure(-takefocus => 0);
+		$textScrolled[1]->Subwidget('yscrollbar')->configure(-takefocus => 0);
+		$newsupertext = 1;
+	}
+	unless ($newsupertext)
+	{
+		$textScrolled[0] = $text1Frame->Scrolled($textwidget,
+				-scrollbars => 'se');
+		$textScrolled[0]->Subwidget('xscrollbar')->configure(-takefocus => 0);
+		$textScrolled[0]->Subwidget('yscrollbar')->configure(-takefocus => 0);
+		$textAdjuster = $text1Frame->Adjuster();
+		$textScrolled[1] = $text1Frame->Scrolled($textwidget,
+				-scrollbars => 'se');
+		$textScrolled[1]->Subwidget('xscrollbar')->configure(-takefocus => 0);
+		$textScrolled[1]->Subwidget('yscrollbar')->configure(-takefocus => 0);
+	}
+	$text1Hash{$activeTab}[0] = $textScrolled[0];
+	$text1Hash{$activeTab}[1] = $textScrolled[1];
+	$text1Hash{$activeTab}[2] = $textAdjuster;
+#	$activeWindows{$activeTab} = 0;
+	$scrnCnts{$activeTab} = $scrnCnt;
+print STDERR "---new tab:  active=$activeTab= scr0=$textScrolled[0]=\n"  if ($debug);
+	Tk::Autoscroll::Init($textScrolled[0])  if ($autoScroll);
+	&BindMouseWheel($textScrolled[0])  if ($WheelMouse);
+	&BindMouseWheel($textScrolled[1])  if ($WheelMouse);
+
+	if ($v)
+	{
+		$textsubwidget = ($AnsiColor && !$noac) ? 'rotextansicolor' : 'rotext';
+		$textsubwidget = 'rosupertext'  if $SuperText;
+		$textsubwidget = "\L$viewer\E"  if ($viewer);
+print STDERR "-subwidget=$textsubwidget= viewer=$viewer= ST=$SuperText=\n"  if ($debug);
+		$text1Text = $textScrolled[0]->Subwidget($textsubwidget);
+		$textScrolled[0]->Subwidget($textsubwidget)->configure(
+				-setgrid=> 1,
+				-font	=> $fixedfont,
+			#-font	=> '-*-lucida console-medium-r-normal-*-18-*-*-*-*-*-*-*',
+				-tabs	=> ['1.35c','2.7c','4.05c'],
+				-insertbackground => 'white',
+				-relief => $mytextrelief,
+				-wrap	=> $wrap,
+				-height => $height,
+				-width  => $width, %{$extraOptsHash{$textsubwidget}});
+		$textScrolled[1]->Subwidget($textsubwidget)->configure(
+				-setgrid=> 1,
+				-font	=> $fixedfont,
+			#-font	=> '-*-lucida console-medium-r-normal-*-18-*-*-*-*-*-*-*',
+				-tabs	=> ['1.35c','2.7c','4.05c'],
+				-insertbackground => 'white',
+				-relief => $mytextrelief,
+				-wrap	=> $wrap,
+				-height => $height,
+				-width  => $width, %{$extraOptsHash{$textsubwidget}});
+		$textScrolled[0]->Subwidget($textsubwidget)->configure(
+				-background => $bg)  if ($bg);
+		$textScrolled[0]->Subwidget($textsubwidget)->configure(
+				-foreground => $fg)  if ($fgisblack || ($fg && $fg !~ /black/io));
+		$textScrolled[1]->Subwidget($textsubwidget)->configure(
+				-background => $bg)  if ($bg);
+		$textScrolled[1]->Subwidget($textsubwidget)->configure(
+				-foreground => $fg)  if ($fgisblack || ($fg && $fg !~ /black/io));
+	}
+	else
+	{
+		$textsubwidget = $SuperText ? 'supertext' : 'textundo';
+		$textsubwidget = "\L$editor\E"  if ($editor);
+		print STDERR "-subwidget=$textsubwidget= viewer=$viewer= ST=$SuperText=\n"  if ($debug);
+		$text1Text = $textScrolled[0]->Subwidget($textsubwidget);
+		$textScrolled[0]->Subwidget($textsubwidget)->configure(
+				-setgrid=> 1,
+				-font	=> $fixedfont,
+				-tabs	=> ['1.35c','2.7c','4.05c'],
+				-insertbackground => 'white',
+				-relief => $mytextrelief,
+				-wrap	=> $wrap,
+				-height => $height,
+				-width  => $width, %{$extraOptsHash{$textsubwidget}});
+		$textScrolled[1]->Subwidget($textsubwidget)->configure(
+				-setgrid=> 1,
+				-font	=> $fixedfont,
+				-tabs	=> ['1.35c','2.7c','4.05c'],
+				-insertbackground => 'white',
+				-relief => $mytextrelief,
+				-wrap	=> $wrap,
+				-height => $height,
+				-width  => $width, %{$extraOptsHash{$textsubwidget}});
+		$textScrolled[0]->Subwidget($textsubwidget)->configure(
+				-background => $bg)  if ($bg);
+		$textScrolled[0]->Subwidget($textsubwidget)->configure(
+				-foreground => $fg)  if ($fgisblack || ($fg && $fg !~ /black/io));
+		$textScrolled[1]->Subwidget($textsubwidget)->configure(
+				-background => $bg)  if ($bg);
+		$textScrolled[1]->Subwidget($textsubwidget)->configure(
+				-foreground => $fg)  if ($fgisblack || ($fg && $fg !~ /black/io));
+		#THIS KLUDGE NECESSARY BECAUSE DUAL-SPEED SETPALETTE BROKEN ON WINDOZE!
+	}
+	if ($haveTextHighlight && ($editor =~ /texthighlight/io || $viewer =~ /texthighlight/io))
+	{
+		my $sections;
+		($sections, $kateExtensions) = $textScrolled[0]->Subwidget($textsubwidget)->fetchKateInfo;
+		$textScrolled[0]->Subwidget($textsubwidget)->addKate2ViewMenu($sections);
+		$textScrolled[1]->Subwidget($textsubwidget)->addKate2ViewMenu($sections);
+		if (open(T, ".myemimes") 
+			|| open (T, "${homedir}.myemimes") || open (T, "${pgmhome}myemimes"))
+		{
+			my ($fext, $ft);
+
+			while (<T>)
+			{
+				chomp;
+				s/\#.*$//o;
+				next  unless (/\S/o);
+				($fext, $ft) = split(/\:/o, $_, 2);
+				$mimeTypes{$fext} = $ft;
+			}
+			close T;
+		}
+	}
+
+	$whichTextWidget = $textScrolled[0]->Subwidget($textsubwidget);
+	unless ($nobrowsetabs)
+	{
+print "-???- raising1 aw=$activeWindow=\n"  if ($debug);
+		$tabbedFrame->raise($activeTab);
+		$r = $tabbedFrame->raised();
+	}
+#print "-???- NOW CURRENT=$r=\n";
+$text1Frame->packPropagate('1');
+$textScrolled[0]->packPropagate('1');
+$textScrolled[1]->packPropagate('1');
+$textScrolled[0]->pack(
+		-side   => 'bottom',
+		-expand => 'yes',
+		-fill   => 'both');
+
+$textScrolled[1]->pack(
+		-side   => 'bottom',
+		-expand => 'yes',
+		-fill   => 'both');
+
+$textAdjuster->packForget();
+#$textScrolled[1]->packConfigure(-side => 'bottom', -expand => 'yes', -fill => 'both');
+$textScrolled[1]->packForget();
+if ($bummer && $w32dnd)
+{
+	$textScrolled[0]->DropSite(-dropcommand => [\&accept_drop, $textScrolled[0]],
+		               -droptypes => 'Win32');
+}
+
+	$textScrolled[0]->bind('<FocusIn>' => sub {
+			&textfocusin; $activeWindow = 0; $activeWindows{$activeTab} = 0;
+			$whichTextWidget = $textScrolled[0]->Subwidget($textsubwidget);
+			$MainWin->title("$titleHeader, ${editmode}ing:  \"$cmdfile{$activeTab}[$activeWindow]\"");
+			$opsys = $opsysList{$activeTab}[$activeWindow];
+			&resetMarks();
+			$statusLabel->configure( -text => $saveStatus{$activeTab}[0]);
+	});
+	$textScrolled[1]->bind('<FocusIn>' => sub {
+			&textfocusin; $activeWindow = 1; $activeWindows{$activeTab} = 1;
+			$whichTextWidget = $textScrolled[1]->Subwidget($textsubwidget);
+			$MainWin->title("$titleHeader, ${editmode}ing:  \"$cmdfile{$activeTab}[$activeWindow]\"");
+			$opsys = $opsysList{$activeTab}[$activeWindow];
+			&resetMarks();
+			$statusLabel->configure( -text => $saveStatus{$activeTab}[1]);
+	});
+	for (my $i=0;$i<=1;$i++)
+	{
+		my @bindTags = $textScrolled[$i]->Subwidget($textsubwidget)->bindtags;
+#REMOVED - MESSES UP AUTOINDENT?!?!?!
+#		$textScrolled[$i]->Subwidget($textsubwidget)->bindtags([$bindTags[1], $bindTags[0], @bindTags[2 .. $#bindTags]]);  #REVERSE BIND ORDER PROCESSING.
+
+		$textScrolled[$i]->Subwidget($textsubwidget)->bind('<Alt-l>' => [\&shocoords,0]);
+		$textScrolled[$i]->Subwidget($textsubwidget)->bind('<F1>' => [\&doFnKey,1]);
+		$textScrolled[$i]->Subwidget($textsubwidget)->bind('<F2>' => [\&doFnKey,2]);
+		$textScrolled[$i]->Subwidget($textsubwidget)->bind('<F3>' => [\&doFnKey,3]);
+		$textScrolled[$i]->Subwidget($textsubwidget)->bind('<F4>' => [\&doFnKey,4]);
+		$textScrolled[$i]->Subwidget($textsubwidget)->bind('<F5>' => [\&doFnKey,5]);
+		$textScrolled[$i]->Subwidget($textsubwidget)->bind('<F6>' => [\&doFnKey,6]);
+		$textScrolled[$i]->Subwidget($textsubwidget)->bind('<F7>' => [\&doFnKey,7]);
+		$textScrolled[$i]->Subwidget($textsubwidget)->bind('<F8>' => [\&doFnKey,8]);
+		$textScrolled[$i]->Subwidget($textsubwidget)->bind('<F9>' => [\&doFnKey,9]);
+		$textScrolled[$i]->Subwidget($textsubwidget)->bind('<F10>' => [\&doFnKey,10]);
+		$textScrolled[$i]->Subwidget($textsubwidget)->bind('<F11>' => [\&doFnKey,11]);
+		$textScrolled[$i]->Subwidget($textsubwidget)->bind('<F12>' => [\&doFnKey,12]);
+#		$textScrolled[$i]->Subwidget($textsubwidget)->bindtags(\@bindTags);  #REVERSE BIND ORDER PROCESSING.
+#		$textScrolled[$i]->Subwidget($textsubwidget)->bind('<Return>', sub { shift->doAutoIndent(1); })  #TRIED TO FIX AUTOINDENT, CAN'T HAVE BOTH F3 & AUTOINDENT WORK?!?!?!
+	}
+	#NEXT 4 BINDINGS NEEDED BECAUSE OF TK-BUG IN Text, AND TextHighlight *Control-Tab BINDINGS!
+	unless ($v)
+	{
+		$textScrolled[0]->Subwidget($textsubwidget)->bind('<Control-Tab>' => sub
+		{
+			#my $w = shift;
+			#$w->focusNext;     #THIS FUNCTION BRINGS SYSTEM TO KNEES BY GOBBLING UP ALL MEMORY+SWAP?!?!?!?!
+			if ($scrnCnts{$activeTab} == 2)
+			{
+				$textScrolled[1]->Subwidget($textsubwidget)->focus;
+			}
+			else
+			{
+				$openButton->focus;
+			}
+			Tk->break;
+		});
+		$textScrolled[1]->Subwidget($textsubwidget)->bind('<Control-Tab>' => sub
+		{
+			#my $w = shift;
+			#$w->focusNext;
+			$openButton->focus;
+			Tk->break;
+		});     #NEXT 2 BINDINGS DON'T WORK FOR SUPERTEXT - JUST DON'T PRESS EM!
+		$textScrolled[0]->Subwidget($textsubwidget)->bind('<Shift-Control-Tab>' => sub
+		{
+			if ($nobrowsetabs)
+			{
+				$exitButton->focus;
+			}
+			else
+			{
+				$exitButton->focusNext->focus;
+			}
+			Tk->break;
+		});
+		$textScrolled[1]->Subwidget($textsubwidget)->bind('<Shift-Control-Tab>' => sub
+		{
+			$textScrolled[0]->Subwidget($textsubwidget)->focus;
+			Tk->break;
+		});
+	}
+
+	if ($SuperText == 1 || $editor =~ /texthighlight/io)
+	{
+		$textScrolled[0]->bind('<Control-p>' => sub
+		{
+				$textScrolled[0]->Subwidget($textsubwidget)->markSet('_prev','insert');
+				$textScrolled[0]->Subwidget($textsubwidget)->jumpToMatchingChar();
+				&shocoords(0);
+		});
+		$textScrolled[1]->bind('<Control-p>' => sub
+		{
+				$textScrolled[1]->Subwidget($textsubwidget)->markSet('_prev','insert');
+				$textScrolled[1]->Subwidget($textsubwidget)->jumpToMatchingChar();
+				&shocoords(0);
+		});
+	}
+	$opsys = ($bummer) ? 'DOS' : 'Unix';
+	my @tablist = $tabbedFrame->pages();
+	for (my $i=0;$i<=1;$i++)
+	{
+		$opsysList{$activeTab}[$i] = $opsys;
+
+		$textScrolled[$i]->Subwidget($textsubwidget)->bind('<ButtonRelease-1>' => [\&shocoords,1]);
+		$textScrolled[$i]->bind('<Alt-comma>' => sub { &doSearch(0,0) });
+		$textScrolled[$i]->bind('<Alt-period>' => sub { &doSearch(0,1) });
+		$textScrolled[$i]->bind('<Alt-a>' => sub { &doSearch(0) });
+		$textScrolled[$i]->bind('<Control-g>' => sub { &doSearch(0,1) });
+		my $cls = ref($textScrolled[$i]->Subwidget($textsubwidget));
+ 		$textScrolled[$i]->Subwidget($textsubwidget)->bind($cls, '<Control-Key-'.scalar(@tablist).'>' => sub{});
+		$textScrolled[$i]->Subwidget($textsubwidget)->bind($cls, '<Alt-Tab>' => sub{});
+	}
+	$textScrolled[0]->Subwidget($textsubwidget)->bind('<Alt-Tab>' => sub
+	{
+#3		if ($nobrowsetabs)    #UNCOMMENT #3 TO HAVE ALT-TAB TRY TO GO TO NEXT BROWSER "TAB".
+#3		{
+			if ($scrnCnts{$activeTab} == 2)
+			{
+				$textScrolled[1]->Subwidget($textsubwidget)->focus;
+			}
+#4			else
+#4			{
+#4				$openButton->focus;
+#4			}
+#3		}
+#3		else
+#3		{
+#3			my @tablist = $tabbedFrame->pages();
+#3			my $nextTab = $tabbedFrame->info('focusnext');
+#3			if ($nextTab && $#tablist > 0)
+#3			{
+#3				$tabbedFrame->raise($nextTab);
+#3			}
+#3			else
+#3			{
+#3				if ($scrnCnts{$activeTab} == 2)
+#3				{
+#3					$textScrolled[1]->Subwidget($textsubwidget)->focus;
+#3				}
+#3				else
+#3				{
+#3					$openButton->focus;
+#3				}
+#3			}
+#3		}
+		Tk->break;
+	});
+	$textScrolled[1]->Subwidget($textsubwidget)->bind('<Alt-Tab>' => sub
+	{
+		$textScrolled[0]->Subwidget($textsubwidget)->focus;
+		Tk->break;
+	});
+	$textScrolled[$activeWindow]->markSet('insert','0.0');
+	&openFn()  if ($openDialog);
+#DOESN'T WORK EXCEPT FOR SUPERTEXT (I CAN'T GET RED OF "Text" WIDGET'S DEFAULT BINDINGS?!
+	$MainWin->bind('<Control-Key-'.scalar(@tablist).'>' => sub
+	{
+		$tabbedFrame->raise($tablist[$#tablist]);
+		Tk->break;
+	});
+}
+
+sub deleteTabFn
+{
+	my $usrres = $No;
+	$saveDialog->configure(
+			-text => "DELETE current tab?");
+	$usrres = $saveDialog->Show();
+	if ($usrres eq $Yes)
+	{
+		return  if (&exitFn($No, 'NOEXIT', $activeTab) eq $Cancel);
+		$tabbedFrame->delete($activeTab);
+	}
+}
+
+sub chgTabs
+{
+	my $thisTab = shift;
+
+	my $r = $tabbedFrame->raised();
+	$activeTab = $r;
+#	print "-chgTabs: args=".join('|',@_)."= THISTAB=$thisTab= CURRENT=$activeTab=\n";
+	$textScrolled[0] = $text1Hash{$activeTab}[0];
+	$textScrolled[1] = $text1Hash{$activeTab}[1];
+	$activeWindow = $activeWindows{$activeTab};
+#	$scrnCnt = $scrnCnts{$activeTab};
+	if (defined $fileMenubtn)
+	{
+		if ($scrnCnts{$activeTab} == 2)
+		{
+			$fileMenubtn->entryconfigure('Single screen',  -state => 'normal');
+			$fileMenubtn->entryconfigure('Split screen',  -state => 'disabled');
+		}
+		else
+		{
+			$fileMenubtn->entryconfigure('Single screen',  -state => 'disabled');
+			$fileMenubtn->entryconfigure('Split screen',  -state => 'normal');
+		}
+	}
+	$textAdjuster = $text1Hash{$activeTab}[2];
+print "-1--AW=$activeWindow= AT=$activeTab= scr0=$textScrolled[0]=\n"  if ($debug);
+	$textScrolled[$activeWindow]->Subwidget($textsubwidget)->focus;
+	&resetMarks();
 }
 
 sub openFn		#File.Open (Open a different command file)
@@ -1304,33 +1697,40 @@ sub openFn		#File.Open (Open a different command file)
 	$usrres = $No;
 	unless ($v)
 	{
-		if (length($textScrolled[$activeWindow]->get('1.0','1.1')))
+		if (length($textScrolled[$activeWindow]->get('1.0','3.0')) > 1)
 		{
 			$saveDialog->configure(
-					-text => "Save any changes to $cmdfile[$activeWindow]?");
-			$usrres = $saveDialog->Show();		
-			$cmdfile[$activeWindow] ||= "$hometmp/e.out.tmp";
+					-text => "Save any changes to $cmdfile{$activeTab}[$activeWindow]?");
+			$usrres = $saveDialog->Show();
+			&fixAfterStep  if ($steppin);
+			$cmdfile{$activeTab}[$activeWindow] ||= "$hometmp/e.out.tmp";
 		}
 	}
 	$_ = '';
-	$usrres = $Cancel x &writedata($cmdfile[$activeWindow])  if ($usrres eq $Yes);
+	$usrres = $Cancel x &writedata($cmdfile{$activeTab}[$activeWindow])  if ($usrres eq $Yes);
 	return  if ($usrres eq $Cancel);
-	my ($savefile) = $cmdfile[$activeWindow];
+	my ($savefile) = $cmdfile{$activeTab}[$activeWindow];
 	if ($openfid || !&getcmdfile("Select file to $editmode"))
 	{
-		$cmdfile[$activeWindow] = $openfid  if ($openfid);
-		if (&fetchdata($cmdfile[$activeWindow]))
+		$cmdfile{$activeTab}[$activeWindow] = $openfid  if ($openfid);
+		&clearMarks();
+		if (&fetchdata($cmdfile{$activeTab}[$activeWindow]))
 		{
-			$MainWin->title("$titleHeader, ${editmode}ing:  \"$cmdfile[$activeWindow]\"")
+			$MainWin->title("$titleHeader, ${editmode}ing:  \"$cmdfile{$activeTab}[$activeWindow]\"");
+			unless ($activeWindow)
+			{
+				(my $filePart = $cmdfile{$activeTab}[$activeWindow]) =~ s#^.*\/([^\/]+)$#$1#;
+				$tabbedFrame->pageconfigure($activeTab, -label => $filePart)  unless ($nobrowsetabs);
+			}
 		}
 		else
 		{
-			$cmdfile[$activeWindow] = $savefile;
+			$cmdfile{$activeTab}[$activeWindow] = $savefile;
 		}
 	}
 	else
 	{
-		$cmdfile[$activeWindow] = $savefile  unless (defined($cmdfile[$activeWindow]));
+		$cmdfile{$activeTab}[$activeWindow] = $savefile  unless (defined($cmdfile{$activeTab}[$activeWindow]));
 	}
 }
 
@@ -1351,7 +1751,7 @@ sub saveSelected
 	my $fid = $fileDialog->Show;
 	$startpath = $fileDialog->getLastPath();
 	$histpathbutton = $fileDialog->getHistUsePathButton();
-	return  unless ($fid =~ /\S/);
+	return  unless ($fid =~ /\S/o);
 	$_ = '';
 
 	if ($newsupertext || $AnsiColor)
@@ -1363,7 +1763,7 @@ sub saveSelected
 		eval {$_ = $textScrolled[$activeWindow]->get('sel.first','sel.last');};
 	}
 	my ($lastpos) = $textScrolled[$activeWindow]->index('sel.last');
-	$_ .= "\n"  if ($_ && $lastpos =~ /\.0$/);
+	$_ .= "\n"  if ($_ && $lastpos =~ /\.0$/o);
 	if ($newsupertext || $AnsiColor)
 	{
 		$_ = $textScrolled[$activeWindow]->getansi('0.0','end')  unless ($_);
@@ -1379,19 +1779,18 @@ sub saveFn		#File.Save (Save changes to command file)
 {
 	my $saveopt = shift || 0;
 	my ($cancel) = 0;
-	#$cancel = &getcmdfile(1)  unless ($cmdfile[$activeWindow] gt ' ');
-	$cancel = &getcmdfile("Save file as")  unless ($cmdfile[$activeWindow] =~ /\S/);
+	$cancel = &getcmdfile("Save file as")  unless ($cmdfile{$activeTab}[$activeWindow] =~ /\S/);
 	return ($cancel)  if ($cancel);   #getcmdfile() returns 1 if no filename entered!
-	$MainWin->title("$titleHeader, ${editmode}ing:  \"$cmdfile[$activeWindow]\"");
+	$MainWin->title("$titleHeader, ${editmode}ing:  \"$cmdfile{$activeTab}[$activeWindow]\"");
 	$_ = '';
 	my $usrres = $Yes;
-	if (-e $cmdfile[$activeWindow])
+	if (-e $cmdfile{$activeTab}[$activeWindow])
 	{
-		my (@fidinfo) = stat($cmdfile[$activeWindow]);
+		my (@fidinfo) = stat($cmdfile{$activeTab}[$activeWindow]);
 		my $msg;
 #		$msg = "file \"$cmdfile[$activeWindow]\"\nACCESSED DURING SESSION! overwrite?"
 #				if ($fileLastUpdated && $fidinfo[8] > $fileLastUpdated);
-		$msg = "file \"$cmdfile[$activeWindow]\"\nexists! overwrite?"
+		$msg = "file \"$cmdfile{$activeTab}[$activeWindow]\"\nexists! overwrite?"
 				unless ($msg || $dontaskagain);
 		if ($msg)
 		{
@@ -1404,7 +1803,7 @@ sub saveFn		#File.Save (Save changes to command file)
 	if ($usrres eq $Yes)
 	{
 		$dontaskagain = 1  unless ($ask > 1);   #IF ASK=2, THEN ALWAYS ASK!
-		return (&writedata($cmdfile[$activeWindow], 0, $saveopt));
+		return (&writedata($cmdfile{$activeTab}[$activeWindow], 0, $saveopt));
 	}
 }
 
@@ -1435,14 +1834,14 @@ sub printFn
 	if ($_)
 	{
 		my ($lastpos) = $textScrolled[$activeWindow]->index('sel.last');
-		$_ .= "\n"  if ($_ && $lastpos =~ /\.0$/);
+		$_ .= "\n"  if ($_ && $lastpos =~ /\.0$/o);
 		$printedselected = 1;
 	}
 	&writedata("$hometmp/e.out.tmp", $printedselected, 2);
-	my $mytitle = $cmdfile[$activeWindow];
+	my $mytitle = $cmdfile{$activeTab}[$activeWindow];
 	$mytitle =~ s/\s/_/g;
-	$intext .= " -o\"title=$mytitle\" "  if ($cmdfile[$activeWindow] && $intext =~ /post/ && $intext !~ /title/);  #SPECIAL FEATURE FOR MY "POST" SCRIPTS!
-	if ($intext =~ /^\s*\|/)
+	$intext .= " -o\"title=$mytitle\" "  if ($cmdfile{$activeTab}[$activeWindow] && $intext =~ /post/o && $intext !~ /title/o);  #SPECIAL FEATURE FOR MY "POST" SCRIPTS!
+	if ($intext =~ /^\s*\|/o)
 	{
 		`cat $hometmp/e.out.tmp $intext &`;
 	}
@@ -1452,142 +1851,158 @@ sub printFn
 	}
 	if ($?)
 	{
-		$statusLabel->configure(-text=>"..Could not print ($intext) - $?.");
+		&setStatus("..Could not print ($intext) - $?.");
 	}
 	elsif ($printedselected)
 	{
-		$statusLabel->configure(-text=>"..printed ($intext) selected text.");
+		&setStatus("..printed ($intext) selected text.");
 	}
 	else
 	{
-		$statusLabel->configure(-text=>"..printed ($intext) all text.");
+		&setStatus("..printed ($intext) all text.");
 	}
 }
 
 sub exitFn 	#File.Save (Save changes to command file)
 {
 	my $saveDefaultYN = shift || $No;
+	my $noExit = shift || 0;
+	my $currentTabOnly = shift || 0;
 
 	my ($cancel) = 0;
-	#$cancel = &getcmdfile(1)  unless ($cmdfile[$activeWindow] gt ' ');
-#	$cancel = &getcmdfile("Save file as")  unless ($cmdfile[$activeWindow] =~ /\S/o);
-#	return ($cancel)  if ($cancel);
 	$_ = '';
 	my ($msg, @wins);
-	if ($scrnCnt == 2)
-	{
-		@wins = (0, 1);
-	}
-	else
-	{
-		@wins = ($activeWindow);
-	}
+	my $saveTab = $activeTab;
+	my $saveActive0 = $activeWindow;
+	my @tablist = ($nobrowsetabs || $currentTabOnly) ? $activeTab : $tabbedFrame->pages();
+	my $tabNum = 1;
 	my ($usrres);
-	my $saveActive = $activeWindow;
-	my $saveActiveWindowFromFocus;
-	my $whichWindowIndicator = ($#wins >= 1) ? '(Top window) ' : '';
-#print STDERR "-wins=".join('|',@wins)."= scrncnt=$scrnCnt= aw=$activeWindow=\n";
-	foreach $activeWindow (@wins)
+TABLOOP: 	foreach $activeTab (@tablist)
 	{
-		$usrres = $saveDefaultYN;
-		$_ = '';
-#print STDERR "----- sd=$saveDefaultYN= ur=$usrres= dontask=$dontaskagain= fid=$cmdfile[$activeWindow]=\n";
-		#DEFAULT=NO OR CMDFILE IS EMPTY OR (ASKAGAIN && CMDFILE EXISTS):
-		if ($saveDefaultYN eq $No || $cmdfile[$activeWindow] !~ /\S/o || (!$dontaskagain && -e $cmdfile[$activeWindow]))
+		$textScrolled[0] = $text1Hash{$activeTab}[0];
+		$textScrolled[1] = $text1Hash{$activeTab}[1];
+		$activeWindow = $activeWindows{$activeTab};
+		if ($scrnCnts{$activeTab} == 2)
 		{
-#			$usrres = $v ? $No : $Cancel;
-			$saveActiveWindowFromFocus = $activeWindow;
-			$whichWindowIndicator =~ s/Top/Bottom/o  if ($activeWindow);
-#print STDERR "-???- v=$v= fid=$cmdfile[$activeWindow]=\n";
-			unless ($v || $cmdfile[$activeWindow] =~ /\S/o)
+			@wins = (0, 1);
+		}
+		else
+		{
+			@wins = ($activeWindow);
+		}
+		my $saveActive = $activeWindow;
+		my $saveActiveWindowFromFocus;
+		my $whichWindowIndicator = ($#wins >= 1) ? '(Top window) ' : '';
+		$whichWindowIndicator = ($nobrowsetabs ? '' : "Tab# $tabNum: ") . $whichWindowIndicator;
+WINDOWLOOP:		foreach $activeWindow (@wins)
+		{
+			$usrres = $saveDefaultYN;
+			$_ = '';
+			#DEFAULT=NO OR CMDFILE IS EMPTY OR (ASKAGAIN && CMDFILE EXISTS):
+			if ($saveDefaultYN eq $No || $cmdfile{$activeTab}[$activeWindow] !~ /\S/o || (!$dontaskagain && -e $cmdfile{$activeTab}[$activeWindow]))
 			{
-				$usrres = $No;
-				$saveDialog->configure(
-						-text => "Save ${whichWindowIndicator}data to a file?");
-				$usrres = $saveDialog->Show();
-				if ($usrres eq $No)
+				$saveActiveWindowFromFocus = $activeWindow;
+				$whichWindowIndicator =~ s/Top/Bottom/o  if ($activeWindow);
+				unless ($v || $cmdfile{$activeTab}[$activeWindow] =~ /\S/o)
 				{
-					&backupFn("e.after$activeWindow.tmp")  unless ($v);
+					$usrres = $No;
+#$_ = length($textScrolled[$activeWindow]->get('1.0','3.0'));
+#print "-????- length=$_=\n";
+					if (length($textScrolled[$activeWindow]->get('1.0','3.0')) > 1)
+					{
+						$saveDialog->configure(
+								-text => "Save ${whichWindowIndicator}data to a file?");
+						$usrres = $saveDialog->Show();
+						if ($usrres eq $No)
+						{
+							&backupFn("e.after$activeWindow.tmp")  unless ($v);
+						}
+					}
+					next  unless ($usrres eq $Yes);
+					&getcmdfile("Save ${whichWindowIndicator}data as");
 				}
-				next  unless ($usrres eq $Yes);
-				&getcmdfile("Save ${whichWindowIndicator}data as");
-#print STDERR "-???- fid=$cmdfile[$activeWindow]= intext=$intext= cash=$_=\n";
+				$msg = '';
+				if (-e $cmdfile{$activeTab}[$activeWindow])
+				{
+					$msg = "${whichWindowIndicator}file \"$cmdfile{$activeTab}[$activeWindow]\"\nexists! overwrite?";
+					if ($chkacc)
+					{
+						my (@fidinfo) = stat($cmdfile{$activeTab}[$activeWindow]);
+						$msg = "${whichWindowIndicator}file \"$cmdfile{$activeTab}[$activeWindow]\"\nACCESSED DURING SESSION! overwrite?"
+								if ($fileLastUpdated && $fidinfo[8] > $fileLastUpdated);
+					}
+				}
+				elsif ($usrres eq $No)
+				{
+					$msg = "Save any ${whichWindowIndicator}changes to $cmdfile{$activeTab}[$activeWindow]?";
+				}
+				if ($msg)
+				{
+					$saveDialog->configure(
+							-text => $msg);
+					$usrres = $saveDialog->Show()  unless ($v);
+				}
+				$activeWindow = $saveActiveWindowFromFocus;
 			}
-			$msg = '';
-			if (-e $cmdfile[$activeWindow])
+			$_ = '';
+#print "-exitFn:  USERRES=$usrres= CANCEL=$Cancel=\n";
+			if ($usrres eq $Yes)
 			{
-#print STDERR "-!!!- somehow file ($cmdfile[$activeWindow]) ".((-e $cmdfile[$activeWindow]) ? 'EXISTS' : 'Does not exist').".\n";
-				$msg = "${whichWindowIndicator}file \"$cmdfile[$activeWindow]\"\nexists! overwrite?";
-				if ($chkacc)
-				{
-					my (@fidinfo) = stat($cmdfile[$activeWindow]);
-					$msg = "${whichWindowIndicator}file \"$cmdfile[$activeWindow]\"\nACCESSED DURING SESSION! overwrite?"
-							if ($fileLastUpdated && $fidinfo[8] > $fileLastUpdated);
-				}
+#			$dontaskagain = 1  unless ($ask > 1);
+#print "-???- exitFn: actTab=$activeTab= actWin=$activeWindow= fid=".$cmdfile{$activeTab}[$activeWindow]."=\n";
+				return  if (&writedata($cmdfile{$activeTab}[$activeWindow]));
+				print "..File \"$cmdfile{$activeTab}[$activeWindow]\" saved.\n";
 			}
 			elsif ($usrres eq $No)
 			{
-				$msg = "Save any ${whichWindowIndicator}changes to $cmdfile[$activeWindow]?";
+				&backupFn("e.after$activeWindow.tmp")  unless ($v);
 			}
-			if ($msg)
+			elsif ($usrres eq $Cancel)
 			{
-				$saveDialog->configure(
-						-text => $msg);
-				$usrres = $saveDialog->Show()  unless ($v);
+#print "-exitFn: exit loop (CANCEL)!\n";
+				last TABLOOP;
 			}
-			$activeWindow = $saveActiveWindowFromFocus;
 		}
-		#return  if (($usrres eq $Yes) && &writedata($cmdfile[$activeWindow]));
-		#print "..File \"$cmdfile[$activeWindow]\" saved.\n"  if ($usrres eq $Yes);
-		#exit(0);
-		$_ = '';
-#print "-9- res=$usrres= aw=$activeWindow=\n";
-		if ($usrres eq $Yes)
-		{
-#			$dontaskagain = 1  unless ($ask > 1);
-			return  if (&writedata($cmdfile[$activeWindow]));
-			print "..File \"$cmdfile[$activeWindow]\" saved.\n";
-		}
-		elsif ($usrres eq $No)
-		{
-			&backupFn("e.after$activeWindow.tmp")  unless ($v);
-		}
-		elsif ($usrres eq $Cancel)
-		{
-			last;
-		}
+		$activeWindow = $saveActive;
+		++$tabNum;
 	}
-	$activeWindow = $saveActive;
+	$activeTab = $saveTab;
+	$textScrolled[0] = $text1Hash{$activeTab}[0];
+	$textScrolled[1] = $text1Hash{$activeTab}[1];
+	$activeWindow = $saveActive0;
+#print "-exitFn - 2:  USERRES=$usrres= CANCEL=$Cancel=\n";
 	if ($usrres ne $Cancel)
 	{
-		exit (0)  unless (shift);
+#print "-exitFn: user did NOT cancel, so exit!\n";
+		exit (0)  unless ($noExit);
 	}
+	return $usrres;
 }
 
 sub saveasFn		#File.save As (Save under new name)
 {
-	my ($savefile) = $cmdfile[$activeWindow];
+	my ($savefile) = $cmdfile{$activeTab}[$activeWindow];
 	my $saveopt = shift;
 
 	unless (&getcmdfile("Save file as"))
 	{
 		my ($usrres) = $Yes;
-		if (!$dontaskagain && -e $cmdfile[$activeWindow])
+		if (!$dontaskagain && -e $cmdfile{$activeTab}[$activeWindow])
 		{
 			$usrres = $Cancel;
 			$saveDialog->configure(
-					-text => "file \"$cmdfile[$activeWindow]\"\nexists! overwrite?");
+					-text => "file \"$cmdfile{$activeTab}[$activeWindow]\"\nexists! overwrite?");
 			$usrres = $saveDialog->Show();
 		}
 		$_ = '';
 		if ($usrres eq $Yes)
 		{
-			&writedata($cmdfile[$activeWindow], 0, $saveopt);
+			&writedata($cmdfile{$activeTab}[$activeWindow], 0, $saveopt);
 			$dontaskagain = 1  unless ($ask > 1);
 		}
 	}
-#	$cmdfile[$activeWindow] = $savefile;	 #KEEP OLD FILENAME AS DEFAULT SAVE / COMMENT OUT TO MAKE SAVE-AS NAME THE DEFAULT SAVE NAME FOR FUTURE SAVES!
-	$MainWin->title("$titleHeader, ${editmode}ing:  \"$cmdfile[$activeWindow]\"");
+#	$cmdfile{$activeTab}[$activeWindow] = $savefile;	 #KEEP OLD FILENAME AS DEFAULT SAVE / COMMENT OUT TO MAKE SAVE-AS NAME THE DEFAULT SAVE NAME FOR FUTURE SAVES!
+	$MainWin->title("$titleHeader, ${editmode}ing:  \"$cmdfile{$activeTab}[$activeWindow]\"");
 }
 
 sub getcmdfile          #PROMPT USER FOR NAME OF DESIRED COMMAND FILE.  RETURNS 1 ON FAILURE/CANCEL
@@ -1607,28 +2022,18 @@ sub getcmdfile          #PROMPT USER FOR NAME OF DESIRED COMMAND FILE.  RETURNS 
 			-DestroyOnHide => $Steppin,
 			-Create => 1);
 	$intext = $fileDialog->Show;
-	if ($Steppin)   #TRYIN TO MAKE OUR STUPID W/M RESTORE FOCUS?!?!?! :(
-	{
-		$MainWin->state('normal');
-		$MainWin->focus();
-		$textScrolled[$activeWindow]->Subwidget($textsubwidget)->focus();
-		$MainWin->raise();
-		$MainWin->focus(-force);
-	}
+	&fixAfterStep()  if ($Steppin);   #TRYIN TO MAKE OUR STUPID W/M RESTORE FOCUS?!?!?! :(
+print "-3--AW=$activeWindow= AT=$activeTab= scr0=$textScrolled[0]=\n"  if ($debug);
 	$textScrolled[$activeWindow]->Subwidget($textsubwidget)->focus();
-	#$startpath = $fileDialog->{Configure}{-Path};
 	$startpath = $fileDialog->getLastPath();
 	$histpathbutton = $fileDialog->getHistUsePathButton();
-	#$intext = undef  if ($intext le ' ');
 	$intext = undef  if ($intext !~ /\S/o);
-	#$cmdfile = $intext  if (defined($intext));
 	if (defined($intext))
 	{
-		$cmdfile[$activeWindow] = $intext;
+		$cmdfile{$activeTab}[$activeWindow] = $intext;
 		$dontaskagain = 0  if ($ask);
 	}
-	return $cmdfile[$activeWindow]  unless ($opt);   #APPEARS NOT 2B USED.
-#	return (1)  unless (defined($intext) && $intext gt ' ');
+	return $cmdfile{$activeTab}[$activeWindow]  unless ($opt);   #APPEARS NOT 2B USED.
 	return (1)  unless (defined($intext));
 	return (0);
 }
@@ -1643,83 +2048,102 @@ sub fetchdata
 		$fileLastUpdated = $fidinfo[8];
 		binmode INFID;
 		$textScrolled[$activeWindow]->delete('0.0','end');
-		$markMenubtn->menu->delete(0,'end');
-		foreach my $i (keys %{$markHash[$activeWindow]})    #DELETE MARKS FOR THIS WINDOW.
-		{
-			delete $markHash[$activeWindow]->{$i};
-			delete $markWidget{$i};
-			$markMenuIndex[$markMenuHash{$i}->{'index'}] = 0;
-			delete $markMenuHash{$i};
-		}
-		for (my $i=0;$i<=$#markMenuIndex;$i++)
-		{
-			if ($markMenuIndex[$i] && $markMenuHash{$markMenuIndex[$i]})
-			{
-				$markMenubtn->command(
-						-label => $markMenuIndex[$i],
-						-underline => $markMenuHash{$markMenuIndex[$i]}->{underline} || '0',
-						-command => $markMenuHash{$markMenuIndex[$i]}->{command});
-			}
-		}
-		$marklist[$activeWindow] = ':insert:sel:';
+		&clearMarks();
 		for ($i=1;$i<=$tagcnt;$i++)
 		{
 			eval {$whichTextWidget->tagDelete("foundme$i");};
 		}
 		$tagcnt = 0;
 		$_ = <INFID>;
-		$opsys = (s/\r\n/\n/g) ? 'DOS' : 'Unix';
-		$opsys = 'Mac'  if (s/\r/\n/g);
-		$opsysList[$activeWindow] = $opsys;
+		$opsys = (s/\r\n/\n/go) ? 'DOS' : 'Unix';
+		$opsys = 'Mac'  if (s/\r/\n/go);
+		$opsysList{$activeTab}[$activeWindow] = $opsys;
 		my $indata = $_;
 		while (<INFID>)
 		{
-			s/\r\n?/\n/g;
+			s/\r\n?/\n/go;
 			$indata .= $_;
 		}
 		close INFID;
-		if ($textsubwidget =~ /xmlviewer/i)
+		if ($textsubwidget =~ /xmlviewer/io)
 		{
 			$textScrolled[$activeWindow]->insertXML(-text => $indata);
-			unless (defined($alreadyHaveXMLMenu[$activeWindow])
-					&& $alreadyHaveXMLMenu[$activeWindow])
+			unless (defined($alreadyHaveXMLMenu{$activeTab}[$activeWindow])
+					&& $alreadyHaveXMLMenu{$activeTab}[$activeWindow])
 			{
 				$textScrolled[$activeWindow]->XMLMenu;
-				$alreadyHaveXMLMenu[$activeWindow] = 1;
+				$alreadyHaveXMLMenu{$activeTab}[$activeWindow] = 1;
 			}
 		}
 		else
 		{
 			if ($haveTextHighlight && ($editor =~ /texthighlight/io || $viewer =~ /texthighlight/io))
 			{
+				my $fext = '';
+				$fext = $1  if ($fid =~ /\.(\w+)$/o);
 				if ($codetext)
 				{
 					my $langModule = ($codetext eq 'Kate') ? &kateExt($fid) : $codetext;
 					$textScrolled[$activeWindow]->Subwidget($textsubwidget)->configure(
 							-syntax => $langModule);
 				}
-#				elsif ($fid =~ /\.p[lm]$/io)
-#				{
-#					$textScrolled[$activeWindow]->Subwidget($textsubwidget)->configure(
-#							-syntax => 'PerlCool');
-#				}
-				elsif ($fid =~ /\.html?$/io)
+				elsif ($mimeTypes{$fext})
 				{
+print STDERR "-chose $mimeTypes{$fext} from mime file!\n"  if ($debug);
+					$textScrolled[$activeWindow]->Subwidget($textsubwidget)->configure(
+							-syntax => $mimeTypes{$fext});
+				}
+				elsif ($fid =~ /\.(?:html?|tmpl)$/io)
+				{
+print STDERR "-chose HTML!\n"  if ($debug);
 					$textScrolled[$activeWindow]->Subwidget($textsubwidget)->configure(
 							-syntax => 'HTML');
 				}
+				elsif ($fid =~ /\.js$/io)
+				{
+print STDERR "-chose JavaScript!\n"  if ($debug);
+					$textScrolled[$activeWindow]->Subwidget($textsubwidget)->configure(
+							-syntax => 'Kate::JavaScript');
+				}
+				elsif ($fid =~ /\.css$/io)
+				{
+print STDERR "-chose CSS!\n"  if ($debug);
+					$textScrolled[$activeWindow]->Subwidget($textsubwidget)->configure(
+							-syntax => 'Kate::CSS');
+				}
 				elsif ($fid =~ /\.sh$/io)
 				{
+print STDERR "-chose Bash!\n"  if ($debug);
 					$textScrolled[$activeWindow]->Subwidget($textsubwidget)->configure(
 							-syntax => 'Bash');
 				}
 				else
 				{
-					my $langModule = &kateExt($fid) || 'PerlCool';
-					$textScrolled[$activeWindow]->Subwidget($textsubwidget)->configure(
-							-syntax => $langModule);
+					my ($line1) = split(/\n/o, $indata);
+					if ($line1 =~ /\#\!.+perl/o)
+					{
+						$textScrolled[$activeWindow]->Subwidget($textsubwidget)->configure(
+								-syntax => 'Kate::Perl');
+print STDERR "-chose Perl based on line 1(#!)!\n"; #  if ($debug);
+					}
+					elsif ($line1 =~ /\#\!.+sh\s*$/o)
+					{
+						$textScrolled[$activeWindow]->Subwidget($textsubwidget)->configure(
+								-syntax => 'Bash');
+print STDERR "-chose Bash based on line 1(#!)!\n"; #  if ($debug);
+					}
+					else
+					{
+						my $langModule = &kateExt($fid) || 'None'; 
+						$textScrolled[$activeWindow]->Subwidget($textsubwidget)->configure(
+								-syntax => $langModule);
+print STDERR "-chose (otherwise) $langModule!\n"  if ($debug);
+					}
 				}
 				$textScrolled[$activeWindow]->Subwidget($textsubwidget)->configure('-rules' => undef);
+#print STDERR "-??????0- tsw=$textsubwidget= aw=$activeWindow=\n";
+#print STDERR "-??????1- tsw=$textsubwidget= aw=$activeWindow= widget=".$textScrolled[$activeWindow]."=\n";
+#print STDERR "-??????2- tsw=$textsubwidget= aw=$activeWindow= widget=".$textScrolled[$activeWindow]->Subwidget($textsubwidget)."=\n";
 				$textScrolled[$activeWindow]->Subwidget($textsubwidget)->highlightPlug;
 			}
 			$textScrolled[$activeWindow]->insert('end',$indata);
@@ -1746,7 +2170,7 @@ sub fetchdata
 				++$cnt;
 			}
 		}
-		$cmdfile[$activeWindow] = $fid;
+		$cmdfile{$activeTab}[$activeWindow] = $fid;
 		$MainWin->title("$titleHeader, ${editmode}ing:  \"$fid\"");
 		$textScrolled[$activeWindow]->markSet('insert','0.0');
 		if (($newsupertext || $AnsiColor) && -r "${fid}.etg" && open (INFID, "${fid}.etg"))
@@ -1754,18 +2178,18 @@ sub fetchdata
 			my ($onoff, $tagtype, $tagindx, %tagStartHash);
 			while (<INFID>)
 			{
-				s/s+$//;
-				($onoff, $tagtype, $tagindx) = split(/\:/);
+				s/s+$//o;
+				($onoff, $tagtype, $tagindx) = split(/\:/o);
 				if ($onoff eq '-')
 				{
 					if ($tagStartHash{$tagtype})
 					{
-						if ($tagtype =~ /ul$/)
+						if ($tagtype =~ /ul$/o)
 						{
 							$textScrolled[$activeWindow]->tagAdd($tagtype, $tagStartHash{$tagtype}, $tagindx);
 							$textScrolled[$activeWindow]->tag("configure", $tagtype, -underline => 1);
 						}
-						elsif ($tagtype =~ /bd$/)
+						elsif ($tagtype =~ /bd$/o)
 						{
 							$textScrolled[$activeWindow]->tagAdd($tagtype, $tagStartHash{$tagtype}, $tagindx);
 							$textScrolled[$activeWindow]->tag("configure", $tagtype, -font => [-weight => "bold" ]);
@@ -1798,11 +2222,11 @@ sub fetchdata
 			{
 				chomp;
 				($mkName, $mkPosn) = split('=');
-				$mkPosn =~ s/\s+$//;    #FOR SOME REASON, CHOMP NOT WORKIN'?!
-				&addMark($mkName, $mkPosn)  if ($mkPosn =~ /^[\d\.]+$/);
+				$mkPosn =~ s/\s+$//o;    #FOR SOME REASON, CHOMP NOT WORKIN'?!
+				&addMark($mkName, $mkPosn)  if ($mkPosn =~ /^[\d\.]+$/o);
 			}
 			close INFID;
-			unlink "${fid}.emk";
+#			unlink "${fid}.emk"  unless ($v);
 		}
 		unless ($v)
 		{
@@ -1812,14 +2236,25 @@ sub fetchdata
 		$_ = "..Successfully opened file: \"$fid\".";
 		unless ($v || $nb)
 		{
-			$_ .= " backup=$backupct."  if ($backupct =~ /\d/);
+			$_ .= " backup=$backupct."  if ($backupct =~ /\d/o);
 		}
-		$statusLabel->configure(-text => $_);
+		&setStatus( $_);
+		unless ($v)
+		{
+			if ($textsubwidget =~ /supertext/io)   #ADDED 20080411 TO BLOCK CHANGES FOR UNDO.
+			{
+				$whichTextWidget->resetUndo;   #FOR SOME REASON SUPERTEXT HATH IT'S OWN METHOD NAMES?!
+			}
+			else
+			{
+				eval { $whichTextWidget->ResetUndo; };
+			}
+		}
 		return 1;
 	}
 	else
 	{
-		$statusLabel->configure(-text=>"..Could not open file: \"$fid\"!");
+		&setStatus("..Could not open file: \"$fid\"!");
 		return undef;
 	}
 }
@@ -1841,10 +2276,9 @@ sub appendfile
 			-Create => 0);
 
 	$fid = $fileDialog->Show;
-	#$startpath = $fileDialog->{Configure}{-Path};
 	$startpath = $fileDialog->getLastPath();
 	$histpathbutton = $fileDialog->getHistUsePathButton();
-	return  unless ($fid =~ /\S/);
+	return  unless ($fid =~ /\S/o);
 
 	if (open(INFID,$fid))
 	{
@@ -1855,7 +2289,7 @@ sub appendfile
 		$textScrolled[$activeWindow]->markGravity('selendmk','right');
 		while (<INFID>)
 		{
-			s/\r\n?/\n/g;
+			s/\r\n?/\n/go;
 			$textScrolled[$activeWindow]->insert('insert',$_)  unless ($v);
 		}
 		close INFID;
@@ -1866,7 +2300,7 @@ sub appendfile
 	}
 	else
 	{
-		$statusLabel->configure(-text=>"..Could not open file: \"$fid\"!");
+		&setStatus("..Could not open file: \"$fid\"!");
 	}
 }
 
@@ -1876,7 +2310,7 @@ sub writedata
 	my $opt = shift || 0;
 	my $saveopt = shift || 0;
 	
-#		$msg = "file \"$cmdfile[$activeWindow]\"\nACCESSED DURING SESSION! overwrite?"
+#		$msg = "file \"$cmdfile{$activeTab}[$activeWindow]\"\nACCESSED DURING SESSION! overwrite?"
 #				if ($fileLastUpdated && $fidinfo[8] > $fileLastUpdated);
 	my ($ffid) = ">$fid";
 	#####$ffid = '>'.$ffid  if ($_);   #MAKE APPEND IF SAVING "SELECTED" TEXT.
@@ -1891,7 +2325,7 @@ sub writedata
 	}
 	else
 	{
-		if ($! =~ /Too many open files/)  #MUST "REPLACE" FILES ON WEBFARM?!
+		if ($! =~ /Too many open files/o)  #MUST "REPLACE" FILES ON WEBFARM?!
 		{
 			if (open(OUTFID, ">$hometmp/e.out.tmp"))
 			{
@@ -1908,7 +2342,7 @@ sub writedata
 			}
 		}
 		print "-writedata: could not open $ffid ($!)!\n";
-		$statusLabel->configure(-text=>"e:Could not save $fid ($!)!");
+		&setStatus("e:Could not save $fid ($!)!");
 		return (1);
 	}
 }
@@ -1928,39 +2362,42 @@ sub write2file
 	}
 	$_ = $textScrolled[$activeWindow]->get('0.0','end')  unless ($_);
 	chomp;
-	s/\r\n/\n/g;
-	if ($opsysList[$activeWindow] eq 'DOS')
+	s/\r\n/\n/go;
+	if ($opsysList{$activeTab}[$activeWindow] eq 'DOS')
 	{
-		s/\n/\r\n/g;
+		s/\n/\r\n/go;
   	}
 	elsif ($opsys eq 'Mac')
 	{
-		s/\n/\r/g;
+		s/\n/\r/go;
 	}
 	print OUTFID;
 	close OUTFID;
 	&saveTags($fid)  if ($saveopt != 2);
 	&saveMarks($fid, $activeWindow)  if ($saveopt == 3 || $savemarks);
-	$statusLabel->configure(-text=>"..Edits saved to file: \"$fid\".");
+	&setStatus("..Edits saved to file: \"$fid\".");
 }
 
 sub saveMarks
 {
 	my $ffid = $_[0] . '.emk';
 	my $thiswindow = $_[1];
-	my @marks = keys %{$markHash[$thiswindow]};
-	my ($m, $mk);
+	my @marks = sort keys %{$markHash{$activeTab}[$thiswindow]};
+print STDERR "-saveMarks: aw=$thiswindow= mark0=$marks[0]=\n"  if ($debug);
+	my ($m, $mk, $mkIndex);
 	if ($#marks >= 0)
 	{
 		foreach $m (@marks)
 		{
-			if ($markMenuHash{$m}->{markposn})
+			if ($markMenuHash{$activeTab}[$activeWindow]{$m}->{markposn})
 			{
 				if (open(OUTFID, ">$ffid"))
 				{
 					foreach $mk (@marks)
 					{
-						print OUTFID "$mk=".$markMenuHash{$mk}->{markposn}."\n";
+#						print OUTFID "$mk=".$markMenuHash{$activeTab}[$activeWindow]{$mk}->{markposn}."\n";
+						$mkIndex = $markWidget{$activeTab}[$activeWindow]{$mk}->index($mk);
+						print OUTFID "$mk=$mkIndex\n";
 					}
 					close OUTFID;
 				}
@@ -1983,7 +2420,7 @@ sub saveTags
 		my $foundatag = 0;
 		for ($i=0;$i<=$#xdump;$i+=3)
 		{
-			if ($xdump[$i+1] =~ /^ANSI/)
+			if ($xdump[$i+1] =~ /^ANSI/o)
 			{
 				$taglist .= (($xdump[$i] eq 'tagon') ? '+' : '-')
 						. ':'.$xdump[$i+1].':'.$xdump[$i+2]."\n";
@@ -2024,7 +2461,7 @@ sub newSearch
 			$clipboard = $whichTextWidget->get('foundme.first','foundme.last');
 		}
 	}
-	unless (defined($clipboard) && $clipboard =~ /\S/)
+	unless (defined($clipboard) && $clipboard =~ /\S/o)
 	{
 		eval
 		{
@@ -2036,8 +2473,8 @@ sub newSearch
 	$startattop = 1  if ($newsearch);
 	if (Exists($xpopup))
 	{
-#	$MainWin->focus(-force);
 		$MainWin->focus();
+print "-4--AW=$activeWindow= AT=$activeTab= scr0=$textScrolled[0]=\n"  if ($debug);
 		$textScrolled[$activeWindow]->Subwidget($textsubwidget)->focus;
 		$xpopup->destroy;
 		$MainWin->raise();
@@ -2073,6 +2510,7 @@ sub newSearch
 	$srchText->bind('<Escape>' => sub
 		{
 			$MainWin->focus();
+print "-5--AW=$activeWindow= AT=$activeTab= scr0=$textScrolled[0]=\n"  if ($debug);
 			$textScrolled[$activeWindow]->Subwidget($textsubwidget)->focus;
 			$xpopup->destroy;
 			$MainWin->raise();
@@ -2215,7 +2653,7 @@ $_ = `perl -v`;
 		}
 		else
 		{
-			$srchTextVar = ($cmdfile[$activeWindow] =~ /\.(?:js|.*ht.+)$/i) ? '^(alert)' : '^(print|for)';
+			$srchTextVar = ($cmdfile{$activeTab}[$activeWindow] =~ /\.(?:js|.*ht.+)$/io) ? '^(alert)' : '^(print|for)';
 		}
 		$srchText->icursor(length($srchTextVar));
 		$srchopts = '-regexp';
@@ -2235,9 +2673,7 @@ $_ = `perl -v`;
 			-text => 'Sub/Fn',
 			-command => sub
 	{
-		#$srchText->delete('0','end'); 
-		#$srchText->insert('0','sub ');
-		$srchTextVar = ($cmdfile[$activeWindow] =~ /\.(?:js|.*ht.+)$/i) ? 'function ' : 'sub ';
+		$srchTextVar = ($cmdfile{$activeTab}[$activeWindow] =~ /\.(?:js|.*ht.+)$/io) ? 'function ' : 'sub ';
 		$srchText->icursor(length($srchTextVar));
 	}
 	)->pack(-side=>'left', -expand=>1, -pady => 6);
@@ -2249,6 +2685,7 @@ $_ = `perl -v`;
 			-command => sub
 	{
 		$MainWin->focus();
+print "-6--AW=$activeWindow= AT=$activeTab= scr0=$textScrolled[0]=\n"  if ($debug);
 		$textScrolled[$activeWindow]->Subwidget($textsubwidget)->focus;
 		$xpopup->destroy;
 		$MainWin->raise();
@@ -2273,7 +2710,6 @@ $_ = `perl -v`;
 
 	unless ($newsearch || $srchstr le ' ')
 	{
-		#$srchText->insert('end',$srchstr)  unless ($newsearch || $srchstr le ' ');
 		$srchTextVar .= $srchstr;
 	}
 	$replText->insert('end',$replstr)  unless ($newsearch || $replstr le ' ');
@@ -2308,7 +2744,7 @@ sub doSearch
 	{
 		$srchstr = $s;
 		$srchopts = '-exact';
-		$srchopts = '-nocase'  if ($srchstr =~ s#/i$##);
+		$srchopts = '-nocase'  if ($srchstr =~ s#/i$##o);
 		$srchwards = 1;
 	}
 	else
@@ -2317,12 +2753,11 @@ sub doSearch
 		eval { $replstr = $replText->get }  if ($newsearch);  #PRODUCES ERROR SOMETIMES W/O EVEL?!?!?!
 		if (Exists($xpopup))
 		{
-#1			$MainWin->raise();
 			$MainWin->focus();
+print "-7--AW=$activeWindow= AT== scr0=$textScrolled[0]=\n"  if ($debug);
 			$textScrolled[$activeWindow]->Subwidget($textsubwidget)->focus;
 			$whichTextWidget->Subwidget($textsubwidget)->focus();
 			$xpopup->destroy;
-#1			sleep(1);
 			$MainWin->raise();
 		}
 	}
@@ -2342,21 +2777,24 @@ sub doSearch
 	}
 	if ($srchpos)
 	{
-		$statusLabel->configure(-text=>"..Found \"$srchstr\" at position $srchpos");
+		&setStatus("..Found \"$srchstr\" at position $srchpos");
 		$whichTextWidget->tagDelete('foundme');
+#		eval { $whichTextWidget->tagRemove('sel','0.0','end'); };  #REMOVED 20080426; ADDED 20080411
+		$whichTextWidget->markSet('anchor', $srchpos);
+#		$whichTextWidget->tagAdd('sel', $srchpos, "$srchpos + $lnoffset char");  #REMOVED 20080426; ADDED 20080411
 		$whichTextWidget->tagAdd('foundme', $srchpos, "$srchpos + $lnoffset char");
 		$whichTextWidget->tagConfigure('foundme',
 				-relief => 'raised',
 				-borderwidth => 1,
 				-background  => 'yellow',
 				-foreground     => 'black');
+		$whichTextWidget->see($srchpos);
 		$srchpos = $whichTextWidget->index("$srchpos + $lnoffset char");
 		$whichTextWidget->markSet('_prev','insert');
 		$whichTextWidget->markSet('insert',$srchpos);
 		$srchpos = $whichTextWidget->index('foundme.first')  unless ($srchwards);
-		$whichTextWidget->see($srchpos);
 		my ($replstrx) = $replstr;
-		if ($replstr =~ /\S/ and !$v)
+		if ($replstr =~ /\S/o and !$v)
 		{
 			#$replstrx = ''  if ($replstr eq "\'\'");  #CHGD. TO NEXT 20050331.
 			$replstrx = ''  if ($replstr eq "``");  #TREAT `` AS EMPTY STR!
@@ -2378,12 +2816,10 @@ sub doSearch
 				}
 				elsif ($srchopts eq '-nocase')
 				{
-#					$chgstr =~ s/\Q$srchstr\E/$replstrx/eig; #CHGD. TO NEXT 20050331.
 					$chgstr =~ s/\Q$srchstr\E/$replstrx/eigs;
 				}
 				else
 				{
-#					$chgstr =~ s/\Q$srchstr\E/$replstrx/eg; #CHGD. TO NEXT 20050331.
 					$chgstr =~ s/\Q$srchstr\E/$replstrx/egs;
 				}
 				$whichTextWidget->delete('foundme.first','foundme.last');
@@ -2402,7 +2838,7 @@ sub doSearch
 	}	
 	else
 	{
-		$statusLabel->configure(-text=>"..Did not find \"$srchstr\".");
+		&setStatus("..Did not find \"$srchstr\".");
 	}
 }
 
@@ -2428,6 +2864,8 @@ sub revsrtext
 sub doIndent
 {
 	my ($doright) = shift;
+	my $standAloneBlock = shift;
+	&beginUndoBlock($textScrolled[$activeWindow])  if ($standAloneBlock);
 	my ($lastpos) = $textScrolled[$activeWindow]->index('sel.last');
 
 	my $spacesperTab = $tabspacing || 3;
@@ -2435,7 +2873,7 @@ sub doIndent
 	my $indentStr = $notabs ? $tspaces : "\t";
 
 	$textScrolled[$activeWindow]->markSet('selstart','sel.first linestart - 2 char');
-	if ($lastpos =~ /\.0$/)
+	if ($lastpos =~ /\.0$/o)
 	{
 		$textScrolled[$activeWindow]->markSet('selend','sel.last - 1 char');
 	}
@@ -2448,11 +2886,10 @@ sub doIndent
 	$clipboard = $textScrolled[$activeWindow]->get('sel.first linestart - 1 char','selend');
 	if ($doright == 1)       #SHIFT ALL LINES RIGHT 1 TAB-STOP.
 	{
-		#$clipboard =~ s/\n/\n\t/g;    #CHGD. TO NEXT 6 20031009 - LEAVE HEREDOC ENDTAGS & COMMENTS ALONE!
-		my @l = split(/\n/, $clipboard, -1);
+		my @l = split(/\n/o, $clipboard, -1);
 		for (my $i=0;$i<=$#l;$i++)
 		{
-			$l[$i] = $indentStr . $l[$i]  unless ($l[$i] !~ /\S/ || ($l[$i] =~ /^(?:\#.*|\w+(?:\:\s*\;\s*)?)$/ && $l[$i] !~ /^else\s*$/i));
+			$l[$i] = $indentStr . $l[$i]  unless ($l[$i] !~ /\S/o || ($l[$i] =~ /^(?:\#.*|\w+(?:\:\s*\;\s*)?)$/o && $l[$i] !~ /^else\s*$/io));
 		}
 		$clipboard = join("\n", @l);
 	}
@@ -2462,22 +2899,15 @@ sub doIndent
 	}
 	$textScrolled[$activeWindow]->delete('sel.first linestart - 1 char','selend');
 	$textScrolled[$activeWindow]->insert('insert',$clipboard);
-	if ($lastpos =~ /\.0$/)
-	{
-		$textScrolled[$activeWindow]->tagAdd('sel','selstart + 2 char','selend');
-	}
-	else
-	{
-		$textScrolled[$activeWindow]->tagAdd('sel','selstart + 2 char','selend + 1 char');
-	}
+	$textScrolled[$activeWindow]->tagAdd('sel','selstart + 2 char','selend + 1 char');
+	$textScrolled[$activeWindow]->markSet('insert', 'sel.first');
+	&endUndoBlock($textScrolled[$activeWindow])  if ($standAloneBlock);
 }
 
 sub setcase
 {
 	my ($whichflag) = shift;
 	my ($lastpos) = $textScrolled[$activeWindow]->index('sel.last');
-
-	#my ($textScrolled[$activeWindow]) = &getactive();
 
 	eval
 	{
@@ -2496,15 +2926,8 @@ sub setcase
 		}
 		$textScrolled[$activeWindow]->delete('sel.first - 1 char','selend');
 		$textScrolled[$activeWindow]->insert('insert',$clipboard);
-		#if ($lastpos =~ /\.0$/)
-		#{
-		#	$textScrolled[$activeWindow]->tagAdd('sel','selstart + 2 char','selend');
-		#}
-		#else
-		#{
 		my ($l) = length($clipboard) - 1;
 		$textScrolled[$activeWindow]->tagAdd('sel',"selend - $l char",'selend');
-		#}
 	}
 }
 
@@ -2519,12 +2942,8 @@ sub gotoErr
 	}
 	;
 	$errline = $errsel  if ($errsel);
-	$errline =~ s/\D//g;
+	$errline =~ s/\D//go;
 	&gotoMark($textScrolled[$activeWindow], $errline);
-	#$textScrolled[$activeWindow]->focus;
-	#$textScrolled[$activeWindow]->markSet('insert',$errline);
-	#$textScrolled[$activeWindow]->see($gotopos);
-	#$statusLabel->configure(-text=>"Cursor now at $gotopos.");
 }
 
 sub doSave
@@ -2532,8 +2951,8 @@ sub doSave
 	my ($mytitle) = "File to save results:";
 	my ($create) = 1;
 	my ($fileDialog) = $MainWin->JFileDialog(
-			-Title=>$mytitle,
-		-Path   => $startpath,
+			-Title =>$mytitle,
+			-Path => $startpath,
 			-History => (defined $histmax) ? $histmax : 16,
 			-HistFile => $histFile,
 			-PathFile => $pathFile,
@@ -2544,32 +2963,31 @@ sub doSave
 			-Create => $create);
 
 	my ($myfile) = $fileDialog->Show(-Horiz=>0);
-	#$startpath = $fileDialog->{Configure}{-Path};
-	$startpath = $fileDialog->getLastPath();
+	&fixAfterStep()  if ($Steppin);
+   	$startpath = $fileDialog->getLastPath();
 	$histpathbutton = $fileDialog->getHistUsePathButton();
-	if ($myfile =~ /\S/ && open(OUTFID, ">$myfile"))
+	if ($myfile =~ /\S/o && open(OUTFID, ">$myfile"))
 	{
 		binmode OUTFID;
 		$_ = $text2Scrolled->get('0.0','end');
 		chomp;
-		s/\r\n/\n/g;
-#		$opsysList[$activeWindow] = $opsys;
+		s/\r\n/\n/go;
 		if ($opsys eq 'DOS')
 		{
-			s/\n/\r\n/g;
+			s/\n/\r\n/go;
 	  	}
 		elsif ($opsys eq 'Mac')
 		{
-			s/\n/\r/g;
+			s/\n/\r/go;
 		}
 		print OUTFID;
 		close OUTFID;
-		$statusLabel->configure(-text=>"..Results saved to file: \"$myfile\".");
+		&setStatus("..Results saved to file: \"$myfile\".");
 		return (0);
 	}
 	else
 	{
-		$statusLabel->configure(-text=>"e:COULD NOT SAVE TO \"$myfile\"!");
+		&setStatus("e:COULD NOT SAVE TO \"$myfile\"!");
 		print "e:COULD NOT SAVE RESULTS TO \"$myfile\"!\n";
 		return (1);
 	}
@@ -2582,25 +3000,47 @@ sub savexFn
 
 sub clearMarks
 {
-	$markMenubtn->menu->delete(0,'end');
-	foreach my $i (keys %{$markHash[$activeWindow]})    #DELETE MARKS FOR THIS WINDOW.
+#print "---CLEARMARKS--- AW=$activeWindow= AT=$activeTab=\n";
+	my $lastMenuItem = $markMenubtn->menu->index('end');
+#print "----last=$lastMenuItem=\n";
+	$markMenubtn->menu->delete($markMenuTop+1,'end')  if ($lastMenuItem > $markMenuTop);
+	foreach my $i (keys %{$markHash{$activeTab}[$activeWindow]})    #DELETE MARKS FOR THIS WINDOW.
 	{
-		delete $markHash[$activeWindow]->{$i};
-		delete $markWidget{$i};
-		$markMenuIndex[$markMenuHash{$i}->{index}] = 0;
-		delete $markMenuHash{$i};
+#print "--------DELETING MARK($i) for $activeTab!\n";
+		delete $markHash{$activeTab}[$activeWindow]->{$i};
+		delete $markWidget{$activeTab}[$activeWindow]{$i};
+		$markMenuIndex{$activeTab}[$activeWindow][$markMenuHash{$activeTab}[$activeWindow]{$i}->{index}] = 0;
+		delete $markMenuHash{$activeTab}[$activeWindow]{$i};
 	}
-	for (my $i=0;$i<=$#markMenuIndex;$i++)
+	for (my $i=0;$i<=$#{$markMenuIndex{$activeTab}[$activeWindow]};$i++)
 	{
-		if ($markMenuIndex[$i] && $markMenuHash{$markMenuIndex[$i]})
+		if ($markMenuIndex{$activeTab}[$activeWindow][$i] && $markMenuHash{$activeTab}[$activeWindow]{$markMenuIndex{$activeTab}[$activeWindow][$i]})
 		{
 			$markMenubtn->command(
-					-label => $markMenuIndex[$i],
-					-underline => $markMenuHash{$markMenuIndex[$i]}->{underline} || '0',
-					-command => $markMenuHash{$markMenuIndex[$i]}->{command});
+					-label => $markMenuIndex{$activeTab}[$activeWindow][$i],
+					-underline => $markMenuHash{$activeTab}[$activeWindow]{$markMenuIndex{$activeTab}[$activeWindow][$i]}->{underline} || '0',
+					-command => $markMenuHash{$activeTab}[$activeWindow]{$markMenuIndex{$activeTab}[$activeWindow][$i]}->{command});
 		}
 	}
-	$marklist[$activeWindow] = ':insert:sel:';
+	$marklist{$activeTab}[$activeWindow] = ':insert:sel:';
+}
+
+sub resetMarks
+{
+#print "---RESETMARKS---\n";
+	return unless (defined $markMenubtn);
+	my $lastMenuItem = $markMenubtn->menu->index('end');
+	$markMenubtn->menu->delete($markMenuTop+1,'end')  if ($lastMenuItem > $markMenuTop);
+	for (my $i=0;$i<=$#{$markMenuIndex{$activeTab}[$activeWindow]};$i++)
+	{
+		if ($markMenuIndex{$activeTab}[$activeWindow][$i] && $markMenuHash{$activeTab}[$activeWindow]{$markMenuIndex{$activeTab}[$activeWindow][$i]})
+		{
+			$markMenubtn->command(
+					-label => $markMenuIndex{$activeTab}[$activeWindow][$i],
+					-underline => $markMenuHash{$activeTab}[$activeWindow]{$markMenuIndex{$activeTab}[$activeWindow][$i]}->{underline} || '0',
+					-command => $markMenuHash{$activeTab}[$activeWindow]{$markMenuIndex{$activeTab}[$activeWindow][$i]}->{command});
+		}
+	}
 }
 
 sub addMark
@@ -2608,50 +3048,57 @@ sub addMark
 	$intext = shift;
 	$mkPosn = shift || 'insert';
 	&gettext("Mark Name:",20,'t',2)  unless ($intext);
-	$intext = '_Bookmark'  unless ($intext =~ /^[_a-zA-Z0-9]/);
+	$intext = '_Bookmark'  unless ($intext =~ /^[_a-zA-Z0-9]/o);
+#print "--addMark:  tab=$activeTab= next=".$markNextIndex{$activeTab}[$activeWindow]."=\n";
 	unless ($intext eq  '*cancel*')
 	{
-		#unless ($intext !~ /\S/ || $markMenuHash{"$intext"})
-		unless ($intext !~ /\S/ || $marklist[$activeWindow] =~ /\:$intext\:/)
+		unless ($intext !~ /\S/o || $marklist{$activeTab}[$activeWindow] =~ /\:$intext\:/)
 		{
-			($intext,$ul) = split(/,/,$intext);
-			$ul = 0  unless ($ul =~ /^\d+$/);
-			$ul = 4  if (!$ul && !$filetype && $intext =~ /^sub /);
+			($intext,$ul) = split(/\,/o, $intext);
+			$ul = 0  unless ($ul =~ /^\d+$/o);
+			$ul = 4  if (!$ul && !$filetype && $intext =~ /^sub /o);
 			#EVAL SO THAT "$intext" IS SET STATICALLY!
-			$markWidget{$intext} = $textScrolled[$activeWindow];
+			$markWidget{$activeTab}[$activeWindow]{$intext} = $textScrolled[$activeWindow];
 			#########eval { $markMenubtn->menu->delete($intext); };
+			$activeWindow = 0  unless ($activeWindow =~ /\d/o);
 			$evalstr = "
-					\$markMenuHash{\"$intext\"}->{index} = \$markNextIndex;
-					\$markMenuIndex[\$markNextIndex] = \"$intext\";
-					\$markNextIndex++;
-					\$markMenuHash{\"$intext\"}->{underline} = \$ul || '0';
-					\$markMenuHash{\"$intext\"}->{command} = sub
+					\$markMenuHash{\"$activeTab\"}[$activeWindow]{\"$intext\"}->{index} = \$markNextIndex{\"$activeTab\"}[$activeWindow];
+					\$markMenuIndex{\"$activeTab\"}[$activeWindow][\$markNextIndex{\"$activeTab\"}[$activeWindow]] = \"$intext\";
+					\$markNextIndex{\"$activeTab\"}[$activeWindow]++;
+					\$markMenuHash{\"$activeTab\"}[$activeWindow]{\"$intext\"}->{underline} = \$ul || '0';
+					\$markMenuHash{\"$activeTab\"}[$activeWindow]{\"$intext\"}->{tab} = \"$activeTab\";
+					\$markMenuHash{\"$activeTab\"}[$activeWindow]{\"$intext\"}->{command} = sub
 					{
-						\$markWidget{\"$intext\"}->markSet('_prev','insert');
-						\$markWidget{\"$intext\"}->markSet('insert',\"$intext\");
-						my (\$gotopos) = \$markWidget{\"$intext\"}->index('insert');
+						\$tabbedFrame->raise(\$markMenuHash{\"$activeTab\"}[$activeWindow]{\"$intext\"}->{tab})  unless (\$nobrowsetabs);
+						\$markWidget{\"$activeTab\"}[$activeWindow]{\"$intext\"}->markSet('_prev','insert');
+						\$markWidget{\"$activeTab\"}[$activeWindow]{\"$intext\"}->markSet('insert',\"$intext\");
+						my (\$gotopos) = \$markWidget{\"$activeTab\"}[$activeWindow]{\"$intext\"}->index('insert');
 
-						\$markWidget{\"$intext\"}->see(\$gotopos);
-						\$statusLabel->configure(-text=>\"Cursor now at \$gotopos.\");
-						\$markWidget{\"$intext\"}->focus;
+						\$markWidget{\"$activeTab\"}[$activeWindow]{\"$intext\"}->see(\$gotopos);
+						\&setStatus(\"Cursor now at \$gotopos.\");
+						\$markWidget{\"$activeTab\"}[$activeWindow]{\"$intext\"}->focus;
 					};
 					\$markMenubtn->command(
 						-label => '$intext',
 						-underline => \$ul,
-						-command => \$markMenuHash{\"$intext\"}->{command}
+						-command => \$markMenuHash{\"$activeTab\"}[$activeWindow]{\"$intext\"}->{command}
 					);
 			";
-			eval $evalstr  unless ($markMenuHash{$intext});
-			$marklist[$activeWindow] .= ':' . $intext . ':';
+#print "-???- hash=".$markMenuHash{$activeTab}[$activeWindow]{$intext}."= act=$activeTab= intext=$intext= eval=$evalstr=\n";
+			eval $evalstr  unless ($markMenuHash{$activeTab}[$activeWindow]{$intext});
+#print "-!!!- eval result=$@=\n";
+			$marklist{$activeTab}[$activeWindow] .= ':' . $intext . ':';
 		}
+#print "-*****- done adding mark!\n";
 		$textScrolled[$activeWindow]->markSet("$intext",$mkPosn);
-		delete $markHash[($activeWindow ? 0 : 1)]->{$intext};
-		$marklist[($activeWindow ? 0 : 1)] =~ s/\Q\:$intext\E\://;
-		$markHash[$activeWindow]->{$intext} = $intext;
+		delete $markHash{$activeTab}[($activeWindow ? 0 : 1)]->{$intext};
+		$marklist{$activeTab}[($activeWindow ? 0 : 1)] =~ s/\Q\:$intext\E\://;
+		$markHash{$activeTab}[$activeWindow]->{$intext} = $intext;
 		my ($markpos) = $textScrolled[$activeWindow]->index($mkPosn);
-		$markMenuHash{$intext}->{markposn} = $markpos;
-		$statusLabel->configure(-text=>"Mark \"$intext\" set to $markpos.");
+		$markMenuHash{$activeTab}[$activeWindow]{$intext}->{markposn} = $markpos;
+		&setStatus("Mark \"$intext\" set to $markpos.");
 	}
+#print "-*****- leaving addmark!\n";
 }
 
 sub gettext
@@ -2668,16 +3115,14 @@ sub gettext
 			$clipboard = $MainWin->SelectionGet(-selection => 'PRIMARY');
 		}
 		;
-	}
-	#unless (defined($clipboard))
-	unless (length($clipboard) > 0)  #NEXT TRY "FOUND" TEXT (HANDY FOR MARKS)!
-	{
-		eval
+		unless (length($clipboard) > 0)  #ADDED 20080426 - NEXT TRY "FOUND" TEXT (HANDY FOR MARKS)!
 		{
-			$clipboard = $textScrolled[$activeWindow]->get('foundme.first','foundme.last');
+			eval
+			{
+				$clipboard = $textScrolled[$activeWindow]->get('foundme.first','foundme.last');
+			}
 		}
 	}
-	#unless (defined($clipboard))
 	unless (length($clipboard) > 0)  #LAST, TRY THE CLIPBOARD.
 	{
 		eval
@@ -2814,7 +3259,7 @@ sub gettext
 				-underline      => 0,
 				-command => [\&dobuttons, $textPopup, $getText, 6]);
 		$endButton->pack(-side=>'left', -expand=>1, -padx=>'2m', -pady=>'2m');
-		my @markChoices = ('_prev',split(/\:+/, substr($marklist[$activeWindow],13)));
+		my @markChoices = ('_prev',split(/\:+/o, substr($marklist{$activeTab}[$activeWindow],13)));
 		$markList = $textPopup->JBrowseEntry(
 				-state => 'readonly',
 				-label => 'Select to mark:',
@@ -2846,19 +3291,15 @@ sub select2Mark
 	my $end = $textScrolled[$activeWindow]->index($markSelected);
 	($end > $start) ? $textScrolled[$activeWindow]->tagAdd('sel', 'insert', $markSelected)
 			: $textScrolled[$activeWindow]->tagAdd('sel', $markSelected, 'insert');
-#	my $gotopos = ($end > $start) ? $textScrolled[$activeWindow]->index('insert')
-#			: $textScrolled[$activeWindow]->index('_prev');
-#	$textScrolled[$activeWindow]->see($gotopos);
-#	$MainWin->focus(-force);
-#	$textScrolled[$activeWindow]->Subwidget($textsubwidget)->focus;
 	$MainWin->focus();
+print "-8--AW=$activeWindow= AT=$activeTab= scr0=$textScrolled[0]=\n"  if ($debug);
 	$textScrolled[$activeWindow]->Subwidget($textsubwidget)->focus;
 	eval { $textPopup->destroy; };
 	$MainWin->raise();
 	$textScrolled[$activeWindow]->markSet('_prev', $start);
 	$textScrolled[$activeWindow]->markSet('insert', $end);
 	$textScrolled[$activeWindow]->see('insert');
-	$statusLabel->configure(-text => "Cursor now at $end.");
+	&setStatus( "Cursor now at $end.");
 	$intext = '*cancel*';   #CANCEL DOGOTO (WE'RE THERE).
 }
 
@@ -2899,8 +3340,8 @@ sub dobuttons
 	{
 		$intext = $xText->get;
 	}
-#	$MainWin->focus(-force);
 	$MainWin->focus();
+print "-9--AW=$activeWindow= AT=$activeTab= scr0=$textScrolled[0]=\n"  if ($debug);
 	$textScrolled[$activeWindow]->Subwidget($textsubwidget)->focus;
 	$xPopup->destroy;
 	$MainWin->raise();
@@ -2913,16 +3354,16 @@ sub gotoMark
 	$intext .= '.0'  if ($intext =~ /^\d+$/o);
 	eval 
 	{
-		if ($markWidget{$intext})
+		if ($markWidget{$activeTab}[$activeWindow]{$intext})
 		{
-			$markWidget{$intext}->focus;
-			$markWidget{$intext}->markSet('_xprev','_prev')  if ($intext eq '_prev');
-			$markWidget{$intext}->markSet('_prev','insert');
+			$markWidget{$activeTab}[$activeWindow]{$intext}->focus;
+			$markWidget{$activeTab}[$activeWindow]{$intext}->markSet('_xprev','_prev')  if ($intext eq '_prev');
+			$markWidget{$activeTab}[$activeWindow]{$intext}->markSet('_prev','insert');
 			$intext = '_xprev'  if ($intext eq '_prev');
-			$markWidget{$intext}->markSet('insert',$intext);
-			my ($gotopos) = $markWidget{$intext}->index('insert');
+			$markWidget{$activeTab}[$activeWindow]{$intext}->markSet('insert',$intext);
+			my ($gotopos) = $markWidget{$activeTab}[$activeWindow]{$intext}->index('insert');
 
-			$markWidget{$intext}->see($gotopos);
+			$markWidget{$activeTab}[$activeWindow]{$intext}->see($gotopos);
 		}
 		else
 		{
@@ -2937,7 +3378,7 @@ sub gotoMark
 		}
 		$gotopos = $textScrolled[$activeWindow]->index('insert')
 				unless ($gotopos =~ /\S/o);
-		$statusLabel->configure(-text=>"Cursor now at $gotopos.");
+		&setStatus("Cursor now at $gotopos.");
 	}
 }
 
@@ -2972,7 +3413,7 @@ sub doGoto
 		}
 		my $gotopos = $textScrolled[$activeWindow]->index('insert');
 		$textScrolled[$activeWindow]->see('insert');
-		$statusLabel->configure(-text=>"Cursor now at $gotopos.");
+		&setStatus("Cursor now at $gotopos.");
 	}		
 }
 
@@ -2992,6 +3433,7 @@ sub GlobalSrchRep
 	$replstr = '';
 	eval { $replstr = (defined $replText) ? $replText->get : ''; };
 	$MainWin->focus();
+print "-10--AW=$activeWindow= AT=$activeTab= scr0=$textScrolled[0]=\n"  if ($debug);
 	$textScrolled[$activeWindow]->Subwidget($textsubwidget)->focus;
 	$xpopup->destroy  if (Exists($xpopup));
 	$MainWin->raise();
@@ -3024,14 +3466,12 @@ sub GlobalSrchRep
 		}
 	}
 	$whichTextWidget->markSet('selstartmk',$selstart);
-	#$whichTextWidget->markGravity('selstartmk','left');
 	$whichTextWidget->markSet('selendmk',$selend);
-	#$whichTextWidget->markGravity('selendmk','right');
-	#$whichTextWidget->delete($selstart,$selend);
 
 	my ($replstrx) = $replstr;
 	$replstrx = ''  if ($replstr eq '``');  #TREAT '' AS EMPTY STR!
 	$srchpos = $selstart;
+	&beginUndoBlock($whichTextWidget);
 	while (1)
 	{
 		$srchpos = $whichTextWidget->search(-forwards, $srchopts, -count => \$lnoffset, '--', $srchstr, $srchpos, 'end');
@@ -3039,8 +3479,6 @@ sub GlobalSrchRep
 		$selend = $whichTextWidget->index('selendmk');
 		last  if ($srchpos > $selend);
 		$whichTextWidget->markSet('insert',$srchpos);
-		#$whichTextWidget->tag('add', $tag, $current, "$current + $length char");
-		#$current = $w->index("$current + $length char");
 		$whichTextWidget->see($srchpos);
 		$whichTextWidget->tagDelete('foundme');
 		$whichTextWidget->tagAdd('foundme', $srchpos, "$srchpos + $lnoffset char");
@@ -3085,7 +3523,8 @@ sub GlobalSrchRep
 				-foreground     => 'black');
 		$srchpos = $whichTextWidget->index("$srchpos + $lnoffset char");
 	}
-	$statusLabel->configure(-text=> "..$tagcnt matches of \"$srchstr\" found/changed!");
+	&endUndoBlock($whichTextWidget);
+	&setStatus( "..$tagcnt matches of \"$srchstr\" found/changed!");
 	$whichTextWidget->tagAdd('sel', 'selstartmk', 'selendmk');
 
 }
@@ -3097,7 +3536,7 @@ sub shocoords
 	$whichTextWidget->mouseSelectAutoScanStop  if ($SuperText && $calledbymouse && !$v);
 	my ($gotopos) = $textScrolled[$activeWindow]->index('insert');
 	$textScrolled[$activeWindow]->see($gotopos);
-	$statusLabel->configure(-text=> $gotopos);
+	&setStatus( $gotopos);
 }
 
 sub setwrap
@@ -3121,7 +3560,7 @@ sub showlength
 	eval {$clipboard = $textScrolled[$activeWindow]->get('sel.first','sel.last');};
 
 	$clipboard = $textScrolled[$activeWindow]->get('0.0','end')  unless ($clipboard);
-	$statusLabel->configure(-text => 'Length = '.length($clipboard));
+	&setStatus( 'Length = '.length($clipboard));
 }
 
 sub showSum
@@ -3130,7 +3569,7 @@ sub showSum
 	eval {$clipboard = $textScrolled[$activeWindow]->get('sel.first','sel.last');};
 
 	$clipboard = $textScrolled[$activeWindow]->get('0.0','end')  unless ($clipboard);
-	my @l = split(/\n/, $clipboard, -1);
+	my @l = split(/\n/o, $clipboard, -1);
 	my $columncnt = 0;
 	my @sums = ();
 	my $columnsnotequal = 0;
@@ -3138,7 +3577,7 @@ sub showSum
 	{
 		@numbers = ();
 		$j = 0;
-		while ($l[$i] =~ s/([\d\+\-\.]+)//)
+		while ($l[$i] =~ s/([\d\+\-\.]+)//o)
 		{
 			$sums[$j++] += $1;
 		}
@@ -3152,7 +3591,7 @@ sub showSum
 	$textScrolled[$activeWindow]->markSet('insert','end');
 	eval { $textScrolled[$activeWindow]->markSet('insert','sel.last'); };
 	$textScrolled[$activeWindow]->insert('insert',$_);
-	$statusLabel->configure(-text => 
+	&setStatus( 
 			"w:No. of Columns NOT EQUAL at row: $columnsnotequal, right-padded w/zeros!")
 		if ($columnsnotequal);
 }
@@ -3178,19 +3617,17 @@ sub setTag
 
 	if ($fg eq 'clear')
 	{
-		my @xdump = $textScrolled[$activeWindow]->dump(-tag, $selstart,$selend);
-		my (@ansitags) = ();
+		my @xdump = $textScrolled[$activeWindow]->dump(-tag, $selstart, $selend);
 		for ($i=0;$i<=$#xdump;$i+=3)
 		{
 			if ($xdump[$i] eq 'tagon')
 			{
-				if ($xdump[$i+1] =~ /^ANSI/)
+				if ($xdump[$i+1] =~ /^ANSI/o)
 				{
-					push (@ansitags, $xdump[$i+1]);
+					$textScrolled[$activeWindow]->tagRemove($xdump[$i+1], $selstart, $selend);
 				}
 			}
 		}
-		$textScrolled[$activeWindow]->tagDelete(@ansitags);
 	}
 	elsif ($fg eq 'ul')
 	{
@@ -3224,12 +3661,12 @@ sub setTheme
 	my ($fgsame, $bgsame);
 	$foreground = 0;
 	eval $_[0];
-	$fgsame = 1  if ($fg =~ s/same//i);
-	$bgsame = 1  if ($bg =~ s/same//i);
+	$fgsame = 1  if ($fg =~ s/same//io);
+	$bgsame = 1  if ($bg =~ s/same//io);
 	my $fgisblack;
-	$fgisblack = 1  if ($fg =~ /black/i); #KLUDGE SINCE SETPALETTE/SUPERTEXT BROKE!
-	$c = ''  if ($c =~ /same/i);
-	if ($c =~ /default/i)
+	$fgisblack = 1  if ($fg =~ /black/io); #KLUDGE SINCE SETPALETTE/SUPERTEXT BROKE!
+	$c = ''  if ($c =~ /same/io);
+	if ($c =~ /default/io)
 	{
 		eval { $MainWin->optionReadfile('~/.Xdefaults') or $MainWin->optionReadfile('/etc/Xdefaults'); };
 		my $c0;
@@ -3258,7 +3695,6 @@ sub setTheme
 				$fg = $MainWin->cget('-foreground');
 			}
 		}
-		#$bg = $MainWin->cget('-background')  unless ($bg);
 		unless ($bg)
 		{
 			if ($palette)
@@ -3277,11 +3713,14 @@ sub setTheme
 		{
 			eval { $MainWin->optionReadfile('~/.Xdefaults') or $MainWin->optionReadfile('/etc/Xdefaults'); };
 			$c = $MainWin->optionGet('tkVpalette','*');
-			$c ||= 'bisque3';
+#			$c ||= 'bisque3';
 			$fg ||= 'black';
-			$bg ||= 'bisque3';
-			$foreground ? $MainWin->setPalette(background => $c, foreground => $foreground)
-					: $MainWin->setPalette($c)
+#			$bg ||= 'bisque3';
+			if ($c)
+			{
+				$foreground ? $MainWin->setPalette(background => $c, foreground => $foreground)
+						: $MainWin->setPalette($c)
+			}
 		}
 		else
 		{
@@ -3292,13 +3731,13 @@ sub setTheme
 #			$MainWin->setPalette($c)  if ($c);
 		}
 	}
-	$fgisblack = 1  if ($fg =~ /black/i);
+	$fgisblack = 1  if ($fg =~ /black/io);
 	$fg = $oldfg || 'green'  if ($fgsame);
 	$bg = $oldbg || 'black'  if ($bgsame);
 	$textScrolled[$activeWindow]->Subwidget($textsubwidget)->configure(
 			-background => $bg)  if ($bg);
 	$textScrolled[$activeWindow]->Subwidget($textsubwidget)->configure(
-			-foreground => $fg)  if ($fgisblack || ($fg && $fg !~ /black/i));
+			-foreground => $fg)  if ($fgisblack || ($fg && $fg !~ /black/io));
 
 	#NOW FIX THE TEXT CURSOR!!!!
 
@@ -3318,15 +3757,7 @@ sub setTheme
 	$textScrolled[$activeWindow]->Subwidget($textsubwidget)->configure(
 			-insertbackground => $csrFG);
 
-#2	#THIS KLUDGE NECESSARY BECAUSE DUAL-SPEED SETPALETTE BROKEN ON WINDOZE!
-#2	if ($bg eq 'black')
-#2	{
-#2		$MainWin->update;
-#2		eval { $textScrolled[$activeWindow]->Subwidget($textsubwidget)->setRule('DEFAULT','-foreground','white');
-#2		$textScrolled[$activeWindow]->Subwidget($textsubwidget)->setRule('Label','-foreground','white'); };
-#2	}
-#print STDERR "-at 4\n";
-	&setFont($font)  if ($font =~ /\d/);
+	&setFont($font)  if ($font =~ /\d/o);
 }
 
 sub accept_drop
@@ -3350,7 +3781,7 @@ sub accept_drop
 	}
 	if ($filename)
 	{
-		$filename =~ s#\\#/#g;  #FIX Windoze FILENAMES!
+		$filename =~ s#\\#/#go;  #FIX Windoze FILENAMES!
 		&openFn($filename);
 	}
 }
@@ -3358,23 +3789,29 @@ sub accept_drop
 sub backupFn
 {
 	my $tofid = shift;   #FID IS NOW THE FILE YOU'RE BACKING UP *TO* IF PASSED IN!
-	my $fmfid = shift;   # || $cmdfile[$activeWindow];
+	my $fmfid = shift;   # || $cmdfile{$activeTab}[$activeWindow];
 
-	$fmfid = $cmdfile[$activeWindow]  if (defined($fmfid) && $fmfid == 1);
+	$fmfid = $cmdfile{$activeTab}[$activeWindow]  if (defined($fmfid) && $fmfid == 1);
 	my $nostatus = $tofid ? 1 : 0;
 
-	if (!$tofid && open(T, "<${homedir}.ebackups"))
+print "-???- backup file=$ebackupFid=\n"  if ($debug);
+#open JWTDBG,">/tmp/e_dbg.txt"; print JWTDBG "-???- backup file=$ebackupFid=\n"; close JWTDBG;
+	if (!$tofid && $ebackupFid && open(T, "<$ebackupFid"))
 	{
+		binmode T;
 		$_ = <T>;
+#print "-???- CASH=$_=\n";
 		chomp;
-		($backups, $backupct) = split(/\,/);
+		($backups, $backupct) = split(/\,/o);
+#print "-!!!- values=$backups,$backupct=\n";
 		close T;
 		++$backupct;
 		$backupct = 0  if ($backupct >= $backups);
 		$tofid = "$hometmp/e.${backupct}.tmp";
 	}
 	$tofid ||= 'e.data.tmp';
-	$tofid = $hometmp.'/'.$tofid  unless ($tofid =~ m#^\/#o);
+	$tofid = $hometmp.'/'.$tofid  unless ($tofid =~ m#^(?:\/|\w\:|\\)#o);
+#print "--------from=$fmfid= to=$tofid=\n";
 	if ($fmfid)
 	{
 		copy($fmfid, $tofid);   #EMERGENCY PROTECTION!
@@ -3392,24 +3829,25 @@ sub backupFn
 		}
 		if (&writedata($tofid, 1, 2))
 		{
-			$statusLabel->configure(-text=>"..Could not back up file to \"$tofid\"!");
+			&setStatus("..Could not back up file to \"$tofid\"!");
 			return $backupct;
 		}
 	}
+#print "-???-1: status=$nostatus= backupcnt=$backupct=\n";
 	unless ($nostatus)
 	{
-		if (open(T, ">${homedir}.ebackups"))
+		if ($ebackupFid && open(T, ">$ebackupFid"))
 		{
 			print T "$backups,$backupct\n";
 			close T;
 			unless ($nostatus)
 			{
-				$statusLabel->configure(-text=>"..backed up: backup=$backupct.")  if ($backupct =~ /\d/);
+				&setStatus("..backed up: backup=$backupct.")  if ($backupct =~ /\d/o);
 			}
 		}
 		else
 		{
-			$statusLabel->configure(-text=>"..Could not save backup information - $?.");
+			&setStatus("..Could not save backup information - $?.");
 		}
 	}
 	return $backupct;
@@ -3417,8 +3855,8 @@ sub backupFn
 
 sub showbkupFn
 {
-	my $bk = ($backupct =~ /\d/) ? $backupct : 'data';
-	$statusLabel->configure(-text=>"..Last backup file was: \"$hometmp/e.${bk}.tmp\".");
+	my $bk = ($backupct =~ /\d/o) ? $backupct : 'data';
+	&setStatus("..Last backup file was: \"$hometmp/e.${bk}.tmp\".");
 }
 
 sub doMyCopy
@@ -3428,10 +3866,20 @@ sub doMyCopy
 	eval
 	{
 		$clipboard = $MainWin->SelectionGet(-selection => 'CLIPBOARD');
+	};
+	unless (length $clipboard) {   #ADDED 20080426: NOTHING SELECTED, TRY "YELLOW" TEXT:
+		eval
+		{
+			$textScrolled[$activeWindow]->tagAdd('sel', 
+					$textScrolled[$activeWindow]->index('foundme.first'), 
+					$textScrolled[$activeWindow]->index('foundme.last'));  #ADDED 20080425
+			&doCopy;
+			$whichTextWidget->tagRemove('sel','0.0','end');
+			$clipboard = $MainWin->SelectionGet(-selection => 'CLIPBOARD');
+		};
 	}
-	;
-	$clipboard =~ s/[\r\n].*$//s;
-	$statusLabel->configure(-text=>"..copied selected text ("
+	$clipboard =~ s/[\r\n].*$//so;
+	&setStatus("..copied selected text ("
 			.substr($clipboard,0,20)."...) to clipboard.")
 		if ($clipboard);		
 }
@@ -3449,11 +3897,11 @@ sub doGetFnKey
 	{
 		if (defined($fnkeyText[$fnkey]) && length($fnkeyText[$fnkey]) > 0)
 		{
-			$fnMenubtn->entryconfigure(("F$fnkey: \"".substr($fnkeyText[$fnkey],0,10).'"'), -label => ("F$fnkey: \"".substr($selected,0,10).'"'));
+			$fnMenubtn->entryconfigure(("F$fnkey: \"".substr($fnkeyText[$fnkey],0,20).'"'), -label => ("F$fnkey: \"".substr($selected,0,20).'"'));
 		}
 		else
 		{
-			$fnMenubtn->entryconfigure("F$fnkey: <undef>", -label => ("F$fnkey: \"".substr($selected,0,10).'"'));
+			$fnMenubtn->entryconfigure("F$fnkey: <undef>", -label => ("F$fnkey: \"".substr($selected,0,20).'"'));
 		}
 		$fnkeyText[$fnkey] = $selected;
 		$textScrolled[$activeWindow]->tagDelete('sel');
@@ -3462,19 +3910,9 @@ sub doGetFnKey
 	{
 		if (defined($fnkeyText[$fnkey]) && length($fnkeyText[$fnkey]) > 0)
 		{
-			$fnMenubtn->entryconfigure(("F$fnkey: \"".substr($fnkeyText[$fnkey],0,10).'"'), -label => "F$fnkey: <undef>");
-		}
-		else
-		{
-			$fnMenubtn->entryconfigure("F$fnkey: <undef>", -label => "F$fnkey: <undef>");
+			$fnMenubtn->entryconfigure(("F$fnkey: \"".substr($fnkeyText[$fnkey],0,20).'"'), -label => "F$fnkey: <undef>");
 		}
 		$fnkeyText[$fnkey] = undef;
-	}
-	if (defined($selected) && length($selected) > 0)
-	{
-	}
-	else
-	{
 	}
 }
 
@@ -3482,18 +3920,117 @@ sub doFnKey    #GIVE THE ABILITY TO HAVE UP TO 5 FUNCTION KEYS SAVED WITH STUFF 
 {
 	return  if ($v);
 	my $fnkey = $_[scalar(@_)-1];
-	$textScrolled[$activeWindow]->markSet('selstartmk','insert');
-	$textScrolled[$activeWindow]->markGravity('selstartmk','left');
-	$textScrolled[$activeWindow]->markSet('selendmk','insert');
-	$textScrolled[$activeWindow]->markGravity('selendmk','right');
+
+	eval { $whichTextWidget->delete('sel.first','sel.last'); };
+	$textScrolled[$activeWindow]->tagDelete('foundme');	
+	if ($fnkey == 3 && !$SuperText)    #THIS HACK TO FIX BIND ISSUE WITH <F3> (SUPERTEXT GETS THIS RIGHT, THOUGH)!
+	{
+		my $clipboard = '';
+		eval
+		{
+			$clipboard = $MainWin->SelectionGet(-selection => 'CLIPBOARD');
+		};
+		my $l = length($clipboard);
+		if ($l > 0)
+		{
+			eval { $whichTextWidget->delete("insert - $l char",'insert'); };
+		}
+	}
+
 	$textScrolled[$activeWindow]->insert('insert', $fnkeyText[$fnkey]);
-	$textScrolled[$activeWindow]->tagDelete('foundme');
-	$textScrolled[$activeWindow]->tagAdd('foundme', 'selstartmk', 'selendmk');
+	my $l = length($fnkeyText[$fnkey]);
+	$textScrolled[$activeWindow]->tagAdd('foundme', "insert - $l char", 'insert');
 	$textScrolled[$activeWindow]->tagConfigure('foundme',
 			-relief => 'raised',
 			-borderwidth => 1,
 			-background  => 'yellow',
 			-foreground  => 'black');
+	Tk->break;
+}
+
+sub doClearFnKeys
+{
+	for (my $fnkey=1;$fnkey<=12;$fnkey++)
+	{
+		if (defined($fnkeyText[$fnkey]) && length($fnkeyText[$fnkey]) > 0)
+		{
+			$fnMenubtn->entryconfigure(("F$fnkey: \"".substr($fnkeyText[$fnkey],0,20).'"'), -label => "F$fnkey: <undef>");
+		}
+		$fnkeyText[$fnkey] = undef;
+	}
+	@fnkeyText = (0);
+}
+
+sub doSaveFnKeys
+{
+	my $anythingDefined = 0;
+	for (my $fnkey=1;$fnkey<=12;$fnkey++)
+	{
+		if (defined($fnkeyText[$fnkey]) && length($fnkeyText[$fnkey]) > 0)
+		{
+			$anythingDefined = 1;
+			last;
+		}
+	}
+	if ($anythingDefined)
+	{
+		if (open (OUT, ">${homedir}.myefns"))
+		{
+			$_ = '';
+			for (my $fnkey=1;$fnkey<=12;$fnkey++)
+			{
+				$_ .= $fnkeyText[$fnkey] . "\x02\n";
+			}
+			chop; chop;
+			print OUT $_;
+			close OUT;
+		}
+	}
+	else
+	{
+		unlink "${homedir}.myefns";
+	}
+}
+
+sub doLoadFnKeys
+{
+	@fnkeyText = (0);
+	if (open (IN, "${homedir}.myefns"))
+	{
+		my $fnkey = 1;
+		my $s = '';
+		while (<IN>)
+		{
+			$s .= $_;
+		}
+		close IN;
+		my @v = split(/\x02\n/o, $s);
+		while (@v)
+		{
+			$_ = shift(@v);
+			if (length($_))
+			{
+				if (defined($fnkeyText[$fnkey]) && length($fnkeyText[$fnkey]) > 0)
+				{
+					$fnMenubtn->entryconfigure(("F$fnkey: \"".substr($fnkeyText[$fnkey],0,20).'"'), -label => ("F$fnkey: \"".substr($_,0,20).'"'));
+				}
+				else
+				{
+					$fnMenubtn->entryconfigure("F$fnkey: <undef>", -label => ("F$fnkey: \"".substr($_,0,20).'"'));
+				}
+				$fnkeyText[$fnkey] = $_;
+			}
+			else
+			{
+				if (defined($fnkeyText[$fnkey]) && length($fnkeyText[$fnkey]) > 0)
+				{
+					$fnMenubtn->entryconfigure(("F$fnkey: \"".substr($fnkeyText[$fnkey],0,20).'"'), -label => "F$fnkey: <undef>");
+				}
+				$fnkeyText[$fnkey] = undef;
+			}
+			++$fnkey;
+		}
+	}
 }
 
 sub updateSearchHistory
@@ -3520,12 +4057,14 @@ sub updateSearchHistory
 
 sub splitScreen
 {
+	my $openDialog = shift || 0;
+
 	my (@geometry) = ($MainWin->width, $MainWin->height);
 
 	$textScrolled[0]->packPropagate('1');
 	$textScrolled[1]->packPropagate('1');
 	my $wasHeight = $text1Frame->height;
-	if ($scrnCnt == 2)
+	if ($scrnCnts{$activeTab} == 2)
 	{
 		my ($usrres) = $No;
 
@@ -3533,7 +4072,7 @@ sub splitScreen
 		$activeWindow = ($inActiveWindow ? 0 : 1);   #ACTIVE WINDOW IS ONE WE'RE FIXING TO CLOSE!
 		my $saveActiveWindowFromFocus = $activeWindow;
 		$saveDialog->configure(
-				-text => "Save any changes to $cmdfile[$activeWindow]?");
+				-text => "Save any changes to $cmdfile{$activeTab}[$activeWindow]?");
 		$usrres = $saveDialog->Show()  unless($v);
 		$activeWindow = $saveActiveWindowFromFocus;
 		my ($cancel) = 0;
@@ -3544,7 +4083,9 @@ sub splitScreen
 			#		-height => $height);
 			$textAdjuster->packForget();
 			$textScrolled[$activeWindow]->packForget();
-			$fileMenubtn->entryconfigure('Single screen',  -label => 'Split screen');
+#			$fileMenubtn->entryconfigure('Single screen',  -label => 'Split screen');
+			$fileMenubtn->entryconfigure('Single screen',  -state => 'disabled');
+			$fileMenubtn->entryconfigure('Split screen',  -state => 'normal');
 			$textScrolled[$inActiveWindow]->Subwidget($textsubwidget)->configure(
 					-height => $height);
 			$textScrolled[$inActiveWindow]->configure(
@@ -3555,36 +4096,39 @@ sub splitScreen
 					-height => $height);
 			$textScrolled[$inActiveWindow]->packConfigure(-fill => 'both', -expand => 1);
 			$textScrolled[$inActiveWindow]->focus();
-			$scrnCnt = 1;
-			$markMenubtn->menu->delete(0,'end');
-			foreach my $i (keys %{$markHash[$activeWindow]})    #DELETE MARKS FOR THIS WINDOW.
+			$scrnCnts{$activeTab} = 1;
+			my $lastMenuItem = $markMenubtn->menu->index('end');
+			$markMenubtn->menu->delete($markMenuTop+1,'end')  if ($lastMenuItem > $markMenuTop);
+			foreach my $i (keys %{$markHash{$activeTab}[$activeWindow]})    #DELETE MARKS FOR THIS WINDOW.
 			{
-				delete $markHash[$activeWindow]->{$i};
-				delete $markWidget{$i};
-				$markMenuIndex[$markMenuHash{$i}->{index}] = 0;
-				delete $markMenuHash{$i};
+				delete $markHash{$activeTab}[$activeWindow]->{$i};
+				delete $markWidget{$activeTab}[$activeWindow]{$i};
+				$markMenuIndex{$activeTab}[$activeWindow][$markMenuHash{$activeTab}[$activeWindow]{$i}->{index}] = 0;
+				delete $markMenuHash{$activeTab}[$activeWindow]{$i};
 			}
-			for (my $i=0;$i<=$#markMenuIndex;$i++)
+			for (my $i=0;$i<=$#{$markMenuIndex{$activeTab}[$activeWindow]};$i++)
 			{
-				if ($markMenuIndex[$i] && $markMenuHash{$markMenuIndex[$i]})
+				if ($markMenuIndex{$activeTab}[$activeWindow][$i] && $markMenuHash{$activeTab}[$activeWindow]{$markMenuIndex{$activeTab}[$activeWindow][$i]})
 				{
 					$markMenubtn->command(
-							-label => $markMenuIndex[$i],
-							-underline => $markMenuHash{$markMenuIndex[$i]}->{underline} || '0',
-							-command => $markMenuHash{$markMenuIndex[$i]}->{command});
+							-label => $markMenuIndex{$activeTab}[$activeWindow][$i],
+							-underline => $markMenuHash{$activeTab}[$activeWindow]{$markMenuIndex{$activeTab}[$i]}->{underline} || '0',
+							-command => $markMenuHash{$activeTab}[$activeWindow]{$markMenuIndex{$activeTab}[$i]}->{command});
 				}
 			}
-			$marklist[$activeWindow] = ':insert:sel:';
+			$marklist{$activeTab}[$activeWindow] = ':insert:sel:';
 		}
 		$activeWindow = $inActiveWindow;
-		$MainWin->title("$titleHeader, ${editmode}ing:  \"$cmdfile[$activeWindow]\"");
+		$MainWin->title("$titleHeader, ${editmode}ing:  \"$cmdfile{$activeTab}[$activeWindow]\"");
 	}
 	else
 	{
 		$textScrolled[0]->packForget();
 		$textScrolled[1]->packForget();
-		$fileMenubtn->entryconfigure('Split screen',  -label => 'Single screen');
-		$scrnCnt = 2;
+#		$fileMenubtn->entryconfigure('Split screen',  -label => 'Single screen');
+		$fileMenubtn->entryconfigure('Split screen',  -state => 'disabled');
+		$fileMenubtn->entryconfigure('Single screen',  -state => 'normal');
+		$scrnCnts{$activeTab} = 2;
 		my $setHeight =  int($height / 2);
 		$textScrolled[0]->configure(
 				-height => $setHeight);
@@ -3602,6 +4146,12 @@ sub splitScreen
 
 		$textScrolled[1]->focus();
 		$text1Frame->packPropagate('1');
+		$activeWindow = 1;
+#print "-??????- AW=$activeWindow=\n";
+		if ($openDialog)
+		{
+			&openFn()  unless (length($textScrolled[1]->get('1.0','3.0')) > 1);
+		}
 	}
 }
 
@@ -3636,7 +4186,6 @@ sub doColorEditor
 	unless ($textColorer)
 	{
 		$textColorer = $MainWin->ColorEditor(-title => 'Select your favorite colors!');
-#print "-set up colorer\n";
 		$textColorer->configure(
 				-widgets=> [$text1Text, $textScrolled[$activeWindow]->Descendants])  unless ($bummer);
 	}
@@ -3645,17 +4194,17 @@ sub doColorEditor
 
 sub showFileName
 {
-	my $fid = $cmdfile[$activeWindow];
-	unless ($fid =~ m#^(?:\/|\w\:)#)
+	my $fid = $cmdfile{$activeTab}[$activeWindow];
+	unless ($fid =~ m#^(?:\/|\w\:)#o)
 	{
 		$_ = &cwd();
-		$_ .= '/'  unless (m#\/$# || $fid =~ m#^(?:\/|\w\:)#);
+		$_ .= '/'  unless (m#\/$#o || $fid =~ m#^(?:\/|\w\:)#o);
 		$fid = $_ . $fid;
 		$fid =~ s#\/[^\/]+\/\.\.\/#\/#o;
 		$fid =~ s#\/\.\/#\/#o;
 	}
-	$statusLabel->configure(-text=> ($cmdfile[$activeWindow] ? $fid : '--untitled--'));
-	if ($cmdfile[$activeWindow])   #NOW PUT THE FULL FILENAME INTO THE CLIPBOARD!
+	&setStatus($cmdfile{$activeTab}[$activeWindow] ? $fid : '--untitled--');
+	if ($cmdfile{$activeTab}[$activeWindow])   #NOW PUT THE FULL FILENAME INTO THE CLIPBOARD!
 	{
 		eval {
 			$MainWin->SelectionOwn(-selection => 'CLIPBOARD');
@@ -3672,6 +4221,12 @@ sub showFileName
 			};
 		};
 	}
+}
+
+sub setStatus
+{
+	$statusLabel->configure( -text => $_[0]);
+	$saveStatus{$activeTab}[$activeWindow] = $_[0];
 }
 
 sub toggleNB
@@ -3717,15 +4272,141 @@ sub kateExt
 
      my $haveKateExt = 0;
 	foreach my $e (keys %{$kateExtensions}) {
-		$kateExtensions->{$e} = 'PerlCool'  if ($kateExtensions->{$e} eq 'Kate::Perl');
 		$kateExtensions->{$e} = 'HTML'  if ($kateExtensions->{$e} eq 'Kate::HTML');
 		$kateExtensions->{$e} = 'Bash'  if ($kateExtensions->{$e} eq 'Kate::Bash');
+#print "-???- kateExt($e)=$kateExtensions->{$e}= fid=$fid=\n";
 		return $kateExtensions->{$e}  if ($fid =~ /$e/i);
 		$haveKateExt = 1;
 	}
-	return 'Kate::Perl'  if ($haveKateExt);
-	return 'PerlCool';
+	return (defined($defaulthighlight) && $defaulthighlight) ? $defaulthighlight : 'None';
+}
+
+sub beginUndoBlock
+{
+	my $whichTextWidget = shift;
+
+	if ($textsubwidget =~ /supertext/io)   #ADDED 20080411 TO BLOCK CHANGES FOR UNDO.
+	{
+		eval { $whichTextWidget->_beginUndoBlock };
+	}
+	else
+	{
+		eval { $whichTextWidget->addGlobStart };
+	}
+}
+
+sub endUndoBlock
+{
+	my $whichTextWidget = shift;
+
+	if ($textsubwidget =~ /supertext/io)   #ADDED 20080411 TO BLOCK CHANGES FOR UNDO.
+	{
+		eval { $whichTextWidget->_endUndoBlock };
+	}
+	else
+	{
+		eval { $whichTextWidget->addGlobEnd };
+	}
+}
+
+sub editfile
+{
+	for (my $i=0;$i<=1;$i++)
+	{
+		if ($cmdfile{$activeTab}[$i])
+		{
+			&saveTags($cmdfile{$activeTab}[$i]);
+			&saveMarks($cmdfile{$activeTab}[$i], $i);
+		}
+	}
+	my $curposn = $textScrolled[$activeWindow]->index('insert');
+	my $cmd = $0;
+	$cmd =~ s/\bv([\w\.]*)/e$1/;
+	my $cmdArgs = $cmdfile{$activeTab}[$activeWindow];
+	system "$cmd -nb -l=$curposn $cmdArgs &";
+}
+
+sub switchPgm
+{
+	my $switchin2E = shift;
+
+	for (my $i=0;$i<=1;$i++)
+	{
+		if ($cmdfile{$activeTab}[$i])
+		{
+			&saveTags($cmdfile{$activeTab}[$i]);
+			&saveMarks($cmdfile{$activeTab}[$i], $i);
+		}
+	}
+	my $nb = '-nb';
+	unless ($switchin2E)
+	{
+		return  if (&exitFn($No, 'NOEXIT') eq $Cancel);
+		$nb = '';
+	}
+
+	my $curposn = $textScrolled[$activeWindow]->index('insert');
+	my $cmd = $0;
+print "-???- BEF: cmd=$cmd= sw2e=$switchin2E=\n"  if ($debug);
+	if ($switchin2E)
+	{
+		$cmd =~ s/\bv([\w\.]*)/e$1/;
+	}
+	else
+	{
+		$cmd =~ s/\be([\w\.]*)/v$1/;
+	}
+print "-???- AFT: cmd=$cmd=\n"  if ($debug);
+	if ($nobrowsetabs)
+	{
+		if ($scrnCnts{$activeTab} == 2)
+		{
+			exec "$cmd $nb -l=$curposn -focus=$activeWindow $cmdfile{$activeTab}[0] $cmdfile{$activeTab}[1]";
+		}
+		else
+		{
+			exec "$cmd $nb -l=$curposn $cmdfile{$activeTab}[$activeWindow]";
+		}
+	}
+	else
+	{
+		my @tablist = $tabbedFrame->pages();
+#print "-???- TAB LIST=".join('|',@tablist)."= ACTIVE=$activeTab=\n";
+		my $cmdArgs = '';
+		my $t = shift(@tablist);
+		$t0 = 'Tab1';
+		$cmdArgs = "-focustab=$t0 -focus=$activeWindows{$t0} "
+				.$cmdArgs  if ($t0 eq $activeTab);
+		my $i = 1;
+		foreach my $t (@tablist)
+		{
+			$t0 = 'Tab'.$i;
+			next  unless ($cmdfile{$t}[0] =~ /\S/o || $cmdfile{$t}[1] =~ /\S/o);
+			$cmdArgs .= " -tab$i=".$cmdfile{$t}[0];
+			$cmdArgs .= ":".$cmdfile{$t}[1]  if ($scrnCnts{$t});
+print "-???2- t0=$t0= t=$t= AT=$activeTab= cmdargs=$cmdArgs=\n"  if ($debug);
+			$cmdArgs = "-focustab=Tab".($i+1)." -focus=$activeWindows{$t} "
+					.$cmdArgs  if ($t eq $activeTab);
+			++$i;
+		}
+		$cmdArgs .= ' '.$cmdfile{$t0}[0];
+		$cmdArgs .= ' '.$cmdfile{$t0}[1]  if ($scrnCnts{$t0});
+#		$cmdArgs = "-focustab=$t0 -focus=$activeWindows{$t0} "
+#					.$cmdArgs  if ($t0 eq $activeTab);
+#print "-???1- t=$t0= cmdargs=$cmdArgs=\n";
+print "-!!!- WILL EXEC($cmd -nb -l=$curposn $cmdArgs)!\n"  if ($debug);
+		exec "$cmd -nb -l=$curposn $cmdArgs";
+	}
+}
+
+sub fixAfterStep   #TRYIN TO MAKE OUR STUPID W/M RESTORE FOCUS?!?!?! :(
+{
+	$MainWin->state('normal');
+	$MainWin->focus();
+print "-2--AW=$activeWindow= AT=$activeTab= scr0=$textScrolled[0]= (FIX AFTERSTEP)\n"  if ($debug);
+	$textScrolled[$activeWindow]->Subwidget($textsubwidget)->focus();
+	$MainWin->raise();
+	$MainWin->focus(-force);
 }
 
 __END__
-

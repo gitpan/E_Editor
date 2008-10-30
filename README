@@ -1,7 +1,9 @@
 Thank you for downloading my favorite X editor (e.pl)!
 
 To install (Windows), download the Windows self-extracting setup program 
-from my website (http://home.mesh.net/turnerjw/jim).
+from my website (http://home.mesh.net/turnerjw/jim).  Also, create a 
+"tmp" subdirectory in your "HOME" directory 
+(C:\Documents and Settings\<username>\tmp).
 
 To install (Linux/Unix), simply copy the 3 files starting with "e_*.pl" and 
 the other ".pl" files to one of your Perl library directories.  To 
@@ -204,3 +206,15 @@ Changes:
 		- Minor fixes to make the AfterStep window-manager raise and give 
 		  focus to the proper window whenever a popup window is closed. 
 		  This only affects AfterStep when used in "ClickToFocus" mode.
+5.00	Wed Oct 15 2008
+		- Added multi-tab browsing via Tk::Notebook.  Rewrote bookmarks to 
+		  now have separate set of bookmarks for each tab and each split 
+		  screen within a tab.  Added -nobrowsetabs option to not use 
+		  tabbed-browsing (old, single screen way).  Fixed several small 
+		  bugs, binds, and optimizations.
+5.10 Mon Oct 27 2008
+		- Fix Windows compatability issues and release new self-installing 
+		  binary.
+5.12 Tue Oct 28 2008
+		- Fix auto-indent bug introduced in last version.
+
